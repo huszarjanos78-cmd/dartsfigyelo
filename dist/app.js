@@ -1,10 +1,12 @@
-import { detectBoard, sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference } from './board-vision.mjs?v=0.3.3';
+import { detectBoard, sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, buildCalibration, ellipsePoint } from './board-vision.mjs?v=0.4';
 
 const $ = id => document.getElementById(id);
 const video = $('video'), overlay = $('overlay'), ctx = overlay.getContext('2d');
 const frame = document.createElement('canvas'), fc = frame.getContext('2d', { willReadFrequently: true });
 const metrics = ['size', 'angle', 'sharpness', 'lighting', 'framing'];
 let stream = null, cv, cvLoading, mode = 'off', candidate = null, locked = null;
+let calibrationPoints = [];
+const calibrationSteps = ['1/5 · Koppints a piros bull közepére.', '2/5 · A 20-as mező középvonalában koppints a dupla gyűrű külső szélére.', '3/5 · A 6-os mező középvonalában koppints a dupla gyűrű külső szélére.', '4/5 · A 3-as mező középvonalában koppints a dupla gyűrű külső szélére.', '5/5 · A 11-es mező középvonalában koppints a dupla gyűrű külső szélére.'];
 let previousCandidate = null, stableBoards = 0, lostBoards = 0, baseline, previous, stableFrames = 0;
 let count = 0, lastEvent = 0, timer, wake, lastScan = 0, recentHit = 0, generation = 0, boardSampler, motionReference;
 
@@ -49,10 +51,13 @@ function renderControls() {
   $('lock').hidden = !stream || mode === 'watching' || mode === 'clearing';
   $('lock').disabled = !canStartWatching();
   $('lock-hint').hidden = $('lock').hidden;
-  $('lock-hint').textContent = !candidate ? 'Keresem a táblát. A figyelés a körvonal megjelenése után indítható.' :
+  $('quality-panel').hidden = !cv || mode === 'calibrating' || !!candidate?.manual || !!locked?.homography;
+  $('calibration-undo').hidden = !stream || !calibrationPoints.length || mode === 'watching' || mode === 'clearing';
+  $('lock-hint').textContent = mode === 'calibrating' ? calibrationSteps[calibrationPoints.length] : candidate?.manual ? 'A célkereszt a megadott bullon van. Ellenőrizd a keretet, majd indítsd a figyelést.' : !candidate ? 'Keresem a táblát. A figyelés a körvonal megjelenése után indítható.' :
     candidate.quality.score < recommendedStartQuality ? `Indítható · Kameraállás: ${candidate.quality.score}%. Gyenge képminőség: a jelzés bizonytalanabb lehet.` :
     `Indítható · Kameraállás: ${candidate.quality.score}%. Rögzítsd a telefont, és indítsd a figyelést.`;
-  $('calibrate').hidden = !stream || mode === 'positioning';
+  $('calibrate').hidden = !stream;
+  $('calibrate').textContent = 'Tábla újrakalibrálása';
   $('reset').disabled = !stream || !locked || mode === 'positioning';
   $('reset').innerHTML = mode === 'clearing' ? 'Tábla üres, folytatás' : 'Nyilak kiszedése<br><small>Szünet / új kör</small>';
 }
@@ -66,18 +71,34 @@ function showQuality(result) {
 }
 function draw() {
   ctx.clearRect(0, 0, overlay.width, overlay.height);
-  const e = locked || candidate?.ellipse; if (!e) return;
-  ctx.save(); ctx.strokeStyle = (candidate?.quality.score ?? 0) >= 75 ? '#ccf279' : '#ffcc78'; ctx.lineWidth = 2.5;
+  const e = locked || candidate?.ellipse;
+  if (mode === 'calibrating') {
+    ctx.save(); ctx.strokeStyle = '#ccf279'; ctx.lineWidth = 2;
+    calibrationPoints.forEach((p, i) => {
+      ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#ccf279'; ctx.font = 'bold 14px sans-serif'; ctx.fillText(i === 0 ? 'BULL' : ['20', '6', '3', '11'][i - 1], p.x + 8, p.y - 8);
+    });
+    ctx.restore();
+  }
+  if (!e) return;
+  ctx.save(); ctx.strokeStyle = e.homography || (candidate?.quality.score ?? 0) >= 75 ? '#ccf279' : '#ffcc78'; ctx.lineWidth = 2.5;
   ctx.setLineDash(locked ? [] : [7, 5]);
-  ctx.beginPath(); ctx.ellipse(e.x, e.y, e.a, e.b, e.angle, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath();
+  if (e.homography) {
+    for (let i = 0; i <= 120; i++) {
+      const p = ellipsePoint(e, 1, i * Math.PI / 60);
+      if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+    }
+  } else ctx.ellipse(e.x, e.y, e.a, e.b, e.angle, 0, Math.PI * 2);
+  ctx.stroke();
   ctx.setLineDash([]); ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(e.x - 8, e.y); ctx.lineTo(e.x + 8, e.y); ctx.moveTo(e.x, e.y - 8); ctx.lineTo(e.x, e.y + 8); ctx.stroke();
   ctx.restore();
 }
 function position() {
-  mode = 'positioning'; locked = null; boardSampler = null; previousCandidate = null; candidate = null; stableBoards = 0; lostBoards = 0;
+  mode = 'calibrating'; calibrationPoints = []; locked = null; boardSampler = null; previousCandidate = null; candidate = null; stableBoards = 0; lostBoards = 0;
   count = 0; $('count').textContent = '0'; resetComparison(); showQuality(null); draw(); renderControls();
-  status('A tábla körvonalát automatikusan keresem…');
+  status(calibrationSteps[0]);
 }
 function capture() {
   if (!video.videoWidth || !video.videoHeight) return null;
@@ -86,7 +107,7 @@ function capture() {
   if (frame.width !== w || frame.height !== h) {
     frame.width = overlay.width = w; frame.height = overlay.height = h;
     $('camera').style.aspectRatio = video.videoWidth + '/' + video.videoHeight;
-    if (locked) { position(); status('A képarány megváltozott. Ellenőrizd újra a kameraállást.', 'warn'); }
+    if (locked || calibrationPoints.length || candidate?.manual) { position(); status('A képarány megváltozott. Jelöld ki újra az öt pontot.', 'warn'); }
   }
   fc.drawImage(video, 0, 0, w, h); return fc.getImageData(0, 0, w, h);
 }
@@ -115,7 +136,7 @@ function watch(image) {
   const shift = estimateCameraShift(image, motionReference);
   if (shift.error > 10) {
     previous = null; stableFrames = 0;
-    status('A kamera elmozdult vagy a tábla takarásban van. Várok a nyugodt képre…');
+    status('A kamera elmozdult vagy a tábla takarásban van. Ha nem áll helyre, koppints a Tábla újrakalibrálása gombra.');
     return;
   }
   const values = pixels(image, shift); if (!values.length) return;
@@ -132,18 +153,18 @@ function watch(image) {
   } else if (Date.now() - recentHit > 2500) status('Figyelek. Jöhet a dobás!', 'good');
 }
 function tick() {
-  if (!stream || !cv || video.readyState < 2 || document.hidden || mode === 'clearing') return;
+  if (!stream || video.readyState < 2 || document.hidden || mode === 'clearing') return;
   try {
     const image = capture(); if (!image) return;
     const now = Date.now();
-    if (now - lastScan > (mode === 'positioning' ? 550 : 1400)) { lastScan = now; scanBoard(image); }
+    if (cv && !locked?.homography && !candidate?.manual && mode !== 'calibrating' && now - lastScan > (mode === 'positioning' ? 550 : 1400)) { lastScan = now; scanBoard(image); }
     if (mode === 'watching' && locked) watch(image);
   } catch (error) { console.error(error); position(); status('A képfeldolgozás megszakadt. Indítsd újra a kamerát.', 'warn'); }
 }
 function stop() {
   generation++; clearInterval(timer);
   const old = stream; stream = null; old?.getTracks().forEach(track => track.stop());
-  video.srcObject = null; mode = 'off'; boardSampler = null; locked = candidate = previousCandidate = null;
+  video.srcObject = null; mode = 'off'; calibrationPoints = []; boardSampler = null; locked = candidate = previousCandidate = null;
   resetComparison(); stableBoards = 0; count = 0; $('count').textContent = '0';
   wake?.release().catch(() => {}); wake = null; $('placeholder').hidden = false; $('live').textContent = 'KAMERA KIKAPCSOLVA';
   showQuality(null); draw(); renderControls(); status('Kamera leállítva.');
@@ -155,7 +176,7 @@ $('start').onclick = async () => {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('A kamera HTTPS-címen, Safariban használható.');
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false });
     video.srcObject = stream; await video.play(); $('placeholder').hidden = true; $('live').textContent = '● ÉLŐ KAMERAKÉP';
-    status('Táblafelismerő betöltése… Az első indítás tovább tarthat.'); await loadVision();
+    // Manual calibration works immediately and does not depend on OpenCV loading.
     if (request !== generation || !stream) return;
     position(); capture(); timer = setInterval(tick, 140); keepAwake();
     stream.getVideoTracks()[0].addEventListener('ended', () => { if (stream) stop(); });
@@ -167,6 +188,30 @@ $('lock').onclick = () => {
   if (!canStartWatching()) return;
   locked = { ...candidate.ellipse }; boardSampler = null; mode = 'watching'; lostBoards = 0; resetComparison(); draw(); renderControls();
   status('Lépj ki a képből. Az üres tábla alaphelyzetét rögzítem…'); speak('Figyelés indítása');
+};
+overlay.onclick = event => {
+  if (!stream || mode !== 'calibrating' || !video.videoWidth) return;
+  const rect = overlay.getBoundingClientRect();
+  const point = { x: (event.clientX - rect.left) * overlay.width / rect.width, y: (event.clientY - rect.top) * overlay.height / rect.height };
+  if (point.x < 0 || point.x >= overlay.width || point.y < 0 || point.y >= overlay.height) return;
+  calibrationPoints.push(point);
+  if (calibrationPoints.length === 5) {
+    try {
+      const ellipse = buildCalibration(calibrationPoints, overlay.width, overlay.height);
+      candidate = { ellipse, manual: true, quality: { score: 0 } };
+      mode = 'positioning';
+      status('Öt pont rögzítve. A célkereszt a bullon van. Indíthatod a figyelést.', 'good');
+    } catch (error) {
+      calibrationPoints.pop();
+      status(error.message + ' Az utolsó pontot jelöld újra, vagy használd a Visszavonás gombot.', 'warn');
+    }
+  } else status(calibrationSteps[calibrationPoints.length]);
+  draw(); renderControls();
+};
+$('calibration-undo').onclick = () => {
+  if (!stream || !calibrationPoints.length || mode === 'watching' || mode === 'clearing') return;
+  calibrationPoints.pop(); candidate = null; mode = 'calibrating';
+  status(calibrationSteps[calibrationPoints.length]); draw(); renderControls();
 };
 $('calibrate').onclick = position;
 $('reset').onclick = () => {

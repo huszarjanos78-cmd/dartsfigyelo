@@ -5,3 +5,5 @@
 .dashboard{position:sticky;top:env(safe-area-inset-top,0px);z-index:10;background:#101c23;margin:14px 0 0;padding:10px 0;gap:12px}.dashboard strong{font-size:48px;color:#ccf279}.dashboard button{padding:10px 12px}.camera{margin-top:12px}
 
 .dashboard{display:grid;grid-template-columns:minmax(0,1fr) auto}.dashboard #lock,.dashboard #lock-hint{grid-column:1/-1}.dashboard #lock{margin:0;justify-content:center;text-align:center}.dashboard #lock-hint{margin:0;font-size:12px;line-height:1.4;color:#bdc8c7}
+
+.dashboard #calibration-undo,.dashboard #calibrate{grid-column:1/-1;margin:0;width:100%;text-align:center}#overlay{cursor:crosshair}

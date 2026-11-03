@@ -1,6 +1,9 @@
 // Scores describe image geometry and quality; they are not recognition probabilities.
+import { projectPoint } from './calibration.mjs?v=0.4';
+export { buildCalibration } from './calibration.mjs?v=0.4';
 export const clamp = (n, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, n));
 export function ellipsePoint(e, r, t) {
+  if (e.homography) return projectPoint(e.homography, r * Math.cos(t), r * Math.sin(t));
   const u = e.a * r * Math.cos(t), v = e.b * r * Math.sin(t), c = Math.cos(e.angle), s = Math.sin(e.angle);
   return { x: e.x + u * c - v * s, y: e.y + u * s + v * c };
 }
@@ -23,8 +26,9 @@ export function createBoardSampler(width, height, e, size = 192) {
     const u = (2 * (x + 0.5) / size - 1) * 0.98;
     const v = (2 * (y + 0.5) / size - 1) * 0.98;
     if (u * u + v * v > 0.98 ** 2) continue;
-    const px = clamp(e.x + e.a * u * c - e.b * v * s, 0, width - 1);
-    const py = clamp(e.y + e.a * u * s + e.b * v * c, 0, height - 1);
+    const projected = e.homography ? projectPoint(e.homography, u, v) : { x: e.x + e.a * u * c - e.b * v * s, y: e.y + e.a * u * s + e.b * v * c };
+    const px = clamp(projected.x, 0, width - 1);
+    const py = clamp(projected.y, 0, height - 1);
     const ix = Math.min(Math.floor(px), width - 2), iy = Math.min(Math.floor(py), height - 2);
     indices.push((iy * width + ix) * 4);
     weights.push(px - ix, py - iy);

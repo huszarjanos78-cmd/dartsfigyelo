@@ -2,18 +2,18 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import vm from 'node:vm';
-import { frameDifference } from '../dist/board-vision.mjs';
+import { frameDifference, buildCalibration, ellipsePoint } from '../dist/board-vision.mjs';
 
 // Exercise the actual UI handlers without requiring a physical camera.
 const source = readFileSync(new URL('../dist/app.js', import.meta.url), 'utf8').replace(/^import .*;\n/, '');
 function app(score = 55, stable = 3) {
   const elements = new Map();
-  const drawing = Object.fromEntries(['clearRect', 'save', 'restore', 'setLineDash', 'beginPath', 'ellipse', 'stroke', 'moveTo', 'lineTo'].map(name => [name, () => {}]));
+  const drawing = Object.fromEntries(['clearRect', 'save', 'restore', 'setLineDash', 'beginPath', 'ellipse', 'stroke', 'moveTo', 'lineTo', 'arc', 'fillText'].map(name => [name, () => {}]));
   const element = id => {
     if (!elements.has(id)) elements.set(id, { style: {}, checked: false, dataset: {}, getContext: () => drawing });
     return elements.get(id);
   };
-  const context = vm.createContext({ frameDifference, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
+  const context = vm.createContext({ frameDifference, buildCalibration, ellipsePoint, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
   vm.runInContext(source, context);
   vm.runInContext(`stream = {}; mode = 'positioning'; stableBoards = ${stable}; candidate = { ellipse: { x: 100, y: 100, a: 80, b: 60, angle: 0 }, quality: { score: ${score} } }; renderControls();`, context);
   return { element, context };
@@ -37,6 +37,38 @@ test('Below 55%, a warning is displayed but manual watching can start', () => {
   assert.match(element('lock-hint').textContent, /Gyenge képminőség/);
   element('lock').onclick();
   assert.equal(vm.runInContext('mode', context), 'watching');
+});
+test('Five taps enable manual watching with an exact bull and undo support', () => {
+  const { element, context } = app();
+  const overlay = element('overlay'); overlay.width = 480; overlay.height = 360;
+  overlay.getBoundingClientRect = () => ({ left: 10, top: 20, width: 240, height: 180 });
+  element('video').videoWidth = 1280;
+  element('calibrate').onclick();
+  assert.equal(element('lock').disabled, true);
+  const taps = [[240, 180], [240, 60], [340, 180], [240, 300], [140, 180]];
+  const tap = ([x, y]) => overlay.onclick({ clientX: 10 + x / 2, clientY: 20 + y / 2 });
+  taps.forEach(tap);
+  assert.equal(element('lock').disabled, false);
+  assert.equal(vm.runInContext('candidate.ellipse.x', context), 240);
+  assert.equal(vm.runInContext('candidate.ellipse.y', context), 180);
+  assert.equal(element('quality-panel').hidden, true);
+  element('calibration-undo').onclick();
+  assert.equal(element('lock').disabled, true);
+  assert.equal(vm.runInContext('calibrationPoints.length', context), 4);
+  tap(taps[4]); element('lock').onclick();
+  assert.equal(vm.runInContext('mode', context), 'watching');
+  assert.ok(vm.runInContext('!!locked.homography', context));
+});
+test('Invalid manual calibration cannot enable watching', () => {
+  const { element, context } = app();
+  const overlay = element('overlay'); overlay.width = 480; overlay.height = 360;
+  overlay.getBoundingClientRect = () => ({ left: 0, top: 0, width: 480, height: 360 });
+  element('video').videoWidth = 1280;
+  element('calibrate').onclick();
+  for (let i = 0; i < 5; i++) overlay.onclick({ clientX: 200, clientY: 180 });
+  assert.equal(element('lock').disabled, true);
+  assert.equal(vm.runInContext('calibrationPoints.length', context), 4);
+  assert.match(element('status').textContent, /újra/);
 });
 test('A freshly found outline can be locked without waiting for three matches', () => {
   const { element, context } = app(74, 1);

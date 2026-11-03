@@ -32,6 +32,8 @@ jobs:
         run: node tests/vision.test.mjs
       - name: Test watching controls
         run: node tests/controls.test.mjs
+      - name: Test manual perspective calibration
+        run: node tests/calibration.test.mjs
       - name: Upload website
         uses: actions/upload-pages-artifact@v3
         with:

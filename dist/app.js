@@ -40,10 +40,19 @@ async function keepAwake() {
   try { if (!wake || wake.released) wake = await navigator.wakeLock?.request('screen'); } catch { /* Optional on iPhone. */ }
 }
 function resetComparison() { baseline = null; previous = null; stableFrames = 0; lastEvent = 0; }
+const minimumStartQuality = 55;
+function canStartWatching() {
+  return !!stream && mode === 'positioning' && !!candidate && stableBoards >= 3 && candidate.quality.score >= minimumStartQuality;
+}
 function renderControls() {
   $('start').textContent = stream ? 'Kamera leállítása' : 'Kamera bekapcsolása ↗';
   $('lock').hidden = !stream || mode === 'watching' || mode === 'clearing';
-  $('lock').disabled = !candidate || stableBoards < 3 || candidate.quality.score < 55;
+  $('lock').disabled = !canStartWatching();
+  $('lock-hint').hidden = $('lock').hidden;
+  $('lock-hint').textContent = !candidate ? 'Keresem a táblát. A figyelés stabil körvonalnál, 55%-tól indítható.' :
+    stableBoards < 3 ? 'Tartsd mozdulatlanul a telefont, amíg a körvonal stabil lesz. Indítás 55%-tól.' :
+    candidate.quality.score < minimumStartQuality ? `Kameraállás: ${candidate.quality.score}%. Az indításhoz legalább 55% szükséges.` :
+    `Indítható · Kameraállás: ${candidate.quality.score}%. Rögzítsd a telefont, és indítsd a figyelést.`;
   $('calibrate').hidden = !stream || mode === 'positioning';
   $('reset').disabled = !stream || !locked || mode === 'positioning';
   $('reset').innerHTML = mode === 'clearing' ? 'Tábla üres, folytatás' : 'Nyilak kiszedése<br><small>Szünet / új kör</small>';
@@ -152,7 +161,7 @@ $('start').onclick = async () => {
   } finally { $('start').disabled = false; }
 };
 $('lock').onclick = () => {
-  if (!candidate || stableBoards < 3 || candidate.quality.score < 55) return;
+  if (!canStartWatching()) return;
   locked = { ...candidate.ellipse }; boardSampler = null; mode = 'watching'; lostBoards = 0; resetComparison(); draw(); renderControls();
   status('Lépj ki a képből. Az üres tábla alaphelyzetét rögzítem…'); speak('Figyelés indítása');
 };

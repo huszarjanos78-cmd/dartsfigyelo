@@ -30,6 +30,8 @@ jobs:
           node --check dist/board-vision.mjs
       - name: Test dartboard detection
         run: node tests/vision.test.mjs
+      - name: Test watching controls
+        run: node tests/controls.test.mjs
       - name: Upload website
         uses: actions/upload-pages-artifact@v3
         with:

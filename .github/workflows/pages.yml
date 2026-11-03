@@ -34,6 +34,8 @@ jobs:
         run: node tests/bull-vision.test.mjs
       - name: Test watching controls
         run: node tests/controls.test.mjs
+      - name: Test zoom and retrieval guard
+        run: node tests/camera-safety.test.mjs
       - name: Test manual perspective calibration
         run: node tests/calibration.test.mjs
       - name: Upload website

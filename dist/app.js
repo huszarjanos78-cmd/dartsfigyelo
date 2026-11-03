@@ -1,9 +1,13 @@
-import { detectBullBoard } from './bull-vision.mjs?v=0.5';
-import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint } from './board-vision.mjs?v=0.5';
+import { zoomCrop } from './camera-view.mjs?v=0.6';
+import { inspectBoardChange, looksLikeRemoval } from './retrieval-guard.mjs?v=0.6';
+import { detectBullBoard } from './bull-vision.mjs?v=0.6';
+import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint } from './board-vision.mjs?v=0.6';
 
 const $ = id => document.getElementById(id);
 const video = $('video'), overlay = $('overlay'), ctx = overlay.getContext('2d');
 const frame = document.createElement('canvas'), fc = frame.getContext('2d', { willReadFrequently: true });
+const preview = $('preview'), pc = preview.getContext('2d');
+let zoom = 1, zoomFocus = { x: .5, y: .5 }, previewRequest, emptyBaseline = null, occlusionFrames = 0;
 const metrics = ['size', 'angle', 'sharpness', 'lighting', 'framing'];
 let stream = null, cv, cvLoading, mode = 'off', candidate = null, locked = null;
 let previousCandidate = null, stableBoards = 0, lostBoards = 0, baseline, previous, stableFrames = 0;
@@ -40,12 +44,14 @@ function loadVision() {
 async function keepAwake() {
   try { if (!wake || wake.released) wake = await navigator.wakeLock?.request('screen'); } catch { /* Optional on iPhone. */ }
 }
-function resetComparison() { motionReference = null; baseline = null; previous = null; stableFrames = 0; lastEvent = 0; }
+function resetComparison() { emptyBaseline = null; occlusionFrames = 0; motionReference = null; baseline = null; previous = null; stableFrames = 0; lastEvent = 0; }
 const recommendedStartQuality = 55;
 function canStartWatching() {
   return !!stream && mode === 'positioning' && !!candidate;
 }
 function renderControls() {
+  $('zoom').disabled = !stream;
+  $('reset').dataset.state = mode === 'clearing' ? 'paused' : 'watching';
   $('start').textContent = stream ? 'Kamera leállítása' : 'Kamera bekapcsolása ↗';
   $('lock').hidden = !stream || mode === 'watching' || mode === 'clearing';
   $('lock').disabled = !canStartWatching();
@@ -85,9 +91,10 @@ function draw() {
   ctx.beginPath(); ctx.moveTo(e.x - 8, e.y); ctx.lineTo(e.x + 8, e.y); ctx.moveTo(e.x, e.y - 8); ctx.lineTo(e.x, e.y + 8); ctx.stroke();
   ctx.restore();
 }
-function position() {
+function position(options = {}) {
   mode = 'positioning'; locked = null; boardSampler = null; previousCandidate = null; candidate = null; stableBoards = 0; lostBoards = 0;
-  count = 0; $('count').textContent = '0'; resetComparison(); showQuality(null); draw(); renderControls();
+  if (!options.preserveCount) { count = 0; $('count').textContent = '0'; }
+  resetComparison(); showQuality(null); draw(); renderControls();
   status('Keresem a bull közepét és a dupla–tripla gyűrűket…');
 }
 function capture() {
@@ -99,7 +106,22 @@ function capture() {
     $('camera').style.aspectRatio = video.videoWidth + '/' + video.videoHeight;
     if (locked || candidate) { position(); status('A képarány megváltozott. Újrakeresem a táblát.', 'warn'); }
   }
-  fc.drawImage(video, 0, 0, w, h); return fc.getImageData(0, 0, w, h);
+  const crop = zoomCrop(video.videoWidth, video.videoHeight, zoom, zoomFocus);
+  fc.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, w, h); return fc.getImageData(0, 0, w, h);
+}
+function drawPreview() {
+  if (!stream) return;
+  if (video.readyState >= 2 && video.videoWidth && video.videoHeight) {
+    const width = Math.min(1280, video.videoWidth), height = Math.round(width * video.videoHeight / video.videoWidth);
+    if (preview.width !== width || preview.height !== height) { preview.width = width; preview.height = height; }
+    const crop = zoomCrop(video.videoWidth, video.videoHeight, zoom, zoomFocus);
+    pc.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, width, height);
+  }
+  previewRequest = requestAnimationFrame(drawPreview);
+}
+function pauseForRetrieval(text) {
+  mode = 'clearing'; resetComparison(); renderControls();
+  status(text + ' A figyelés szünetel. Ha a tábla üres és kiléptél a képből, koppints a folytatásra.', 'warn');
 }
 function scanBoard(image) {
   const result = detectBullBoard(cv, image);
@@ -121,22 +143,46 @@ function pixels(image, shift) {
 const difference = frameDifference;
 
 function watch(image) {
+  if (mode !== 'watching' || !locked) return;
+  const original = image;
   image = prepareMotionFrame(image);
   if (!motionReference) motionReference = createMotionReference(image, locked);
   const shift = estimateCameraShift(image, motionReference);
   if (shift.error > 10) {
+    if (!baseline) { motionReference = null; previous = null; stableFrames = 0; status('Az alaphelyzethez lépj ki a képből, és várd meg a nyugodt táblát.'); return; }
+    if (++occlusionFrames >= 3) { pauseForRetrieval('Takarás vagy nagy kameraelmozdulás.'); return; }
     previous = null; stableFrames = 0;
     status('A kamera elmozdult vagy a tábla takarásban van. Ha nem áll helyre, koppints a Tábla újrakeresése gombra.');
     return;
   }
   const values = pixels(image, shift); if (!values.length) return;
+  const change = baseline ? inspectBoardChange(values, baseline) : null;
+  if (change?.obstructed) {
+    previous = null; stableFrames = 0;
+    if (++occlusionFrames >= 3) pauseForRetrieval('Nagy, összefüggő takarás a táblánál.');
+    else status('Takarás a táblánál. Nem számolok találatot.', 'warn');
+    return;
+  }
+  occlusionFrames = 0;
   if (!previous || previous.length !== values.length) { previous = values; return; }
   const motion = difference(values, previous); previous = values;
   if (motion.ratio > 0.004 || motion.mean > 2.8) { stableFrames = 0; status('Mozgás a táblánál. Várok a nyugodt képre…'); return; }
   if (++stableFrames < 10) return;
-  if (!baseline) { baseline = values; status('Figyelek. Jöhet a dobás!', 'good'); return; }
-  const delta = difference(values, baseline), threshold = [0.009, 0.006, 0.0035, 0.002, 0.0012][Number($('sensitivity').value) - 1];
-  if (delta.ratio > 0.14) { status('Nagy változás. Ellenőrizd a táblát, majd indíts új kört.', 'warn'); return; }
+  if (!baseline) {
+    if (cv) {
+      const visible = detectBullBoard(cv, original);
+      if (!visible || !sameBoard(locked, visible.ellipse, .15)) {
+        motionReference = null; previous = null; stableFrames = 0;
+        status('Az alaphelyzethez látnom kell a bullt és a teljes pontozó gyűrűt. Lépj ki a képből.', 'warn');
+        return;
+      }
+    }
+    baseline = emptyBaseline = values; status('Figyelek. Jöhet a dobás!', 'good'); return;
+  }
+  const delta = change, threshold = [0.009, 0.006, 0.0035, 0.002, 0.0012][Number($('sensitivity').value) - 1];
+  if (count > 0 && delta.ratio > threshold && looksLikeRemoval(values, baseline, emptyBaseline)) {
+    pauseForRetrieval('Nyílkiszedéshez hasonló változás.'); return;
+  }
   if (delta.ratio > threshold && Date.now() - lastEvent > 2200) {
     $('count').textContent = ++count; baseline = values; lastEvent = recentHit = Date.now(); stableFrames = 0;
     status('Nyíl érzékelve · ' + count + '. találat', 'good'); speak('Nyíl érzékelve');
@@ -152,9 +198,9 @@ function tick() {
   } catch (error) { console.error(error); position(); status('A képfeldolgozás megszakadt. Indítsd újra a kamerát.', 'warn'); }
 }
 function stop() {
-  generation++; clearInterval(timer);
+  generation++; clearInterval(timer); cancelAnimationFrame(previewRequest);
   const old = stream; stream = null; old?.getTracks().forEach(track => track.stop());
-  video.srcObject = null; mode = 'off'; boardSampler = null; locked = candidate = previousCandidate = null;
+  video.srcObject = null; pc.clearRect(0, 0, preview.width, preview.height); mode = 'off'; boardSampler = null; locked = candidate = previousCandidate = null;
   resetComparison(); stableBoards = 0; count = 0; $('count').textContent = '0';
   wake?.release().catch(() => {}); wake = null; $('placeholder').hidden = false; $('live').textContent = 'KAMERA KIKAPCSOLVA';
   showQuality(null); draw(); renderControls(); status('Kamera leállítva.');
@@ -165,7 +211,7 @@ $('start').onclick = async () => {
   try {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('A kamera HTTPS-címen, Safariban használható.');
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false });
-    video.srcObject = stream; await video.play(); $('placeholder').hidden = true; $('live').textContent = '● ÉLŐ KAMERAKÉP';
+    video.srcObject = stream; await video.play(); drawPreview(); $('placeholder').hidden = true; $('live').textContent = '● ÉLŐ KAMERAKÉP';
     mode = 'loading'; renderControls();
     status('Az automatikus táblafelismerő betöltése…'); await loadVision();
     if (request !== generation || !stream) return;
@@ -186,6 +232,20 @@ $('reset').onclick = () => {
   if (mode !== 'clearing') { mode = 'clearing'; resetComparison(); status('Figyelés szünetel. Szedd ki a nyilakat, majd koppints a folytatásra.'); }
   else { count = 0; $('count').textContent = '0'; mode = 'watching'; lostBoards = 0; lastScan = 0; resetComparison(); status('Lépj ki a képből. Új alaphelyzet rögzítése…'); }
   renderControls();
+};
+$('zoom').oninput = () => {
+  const board = locked || candidate?.ellipse;
+  if (board && video.videoWidth && video.videoHeight && frame.width && frame.height) {
+    const crop = zoomCrop(video.videoWidth, video.videoHeight, zoom, zoomFocus);
+    zoomFocus = { x: (crop.x + board.x / frame.width * crop.width) / video.videoWidth,
+      y: (crop.y + board.y / frame.height * crop.height) / video.videoHeight };
+  }
+  zoom = Math.max(1, Math.min(3, Number($('zoom').value) || 1));
+  $('zoom-value').textContent = zoom.toFixed(1) + '×';
+  if (stream) {
+    position({ preserveCount: true });
+    status('Nagyítás módosítva. A teljes dupla gyűrű férjen a képbe; a felismerés után indítsd újra a figyelést.');
+  }
 };
 $('sensitivity').oninput = () => { $('svalue').value = $('sensitivity').value; if (mode === 'watching') { resetComparison(); status('Érzékenység módosítva. Alaphelyzet rögzítése…'); } };
 $('sound').onclick = () => speak('Nyíl érzékelve');

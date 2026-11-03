@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import vm from 'node:vm';
+import { inspectBoardChange, looksLikeRemoval } from '../dist/retrieval-guard.mjs';
+import { zoomCrop } from '../dist/camera-view.mjs';
 import { frameDifference, buildCalibration, ellipsePoint } from '../dist/board-vision.mjs';
 
 // Exercise the actual UI handlers without requiring a physical camera.
@@ -13,7 +15,7 @@ function app(score = 55, stable = 3) {
     if (!elements.has(id)) elements.set(id, { style: {}, checked: false, dataset: {}, getContext: () => drawing });
     return elements.get(id);
   };
-  const context = vm.createContext({ frameDifference, buildCalibration, ellipsePoint, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
+  const context = vm.createContext({ inspectBoardChange, looksLikeRemoval, zoomCrop, frameDifference, buildCalibration, ellipsePoint, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
   vm.runInContext(source, context);
   vm.runInContext(`stream = {}; mode = 'positioning'; stableBoards = ${stable}; candidate = { ellipse: { x: 100, y: 100, a: 80, b: 60, angle: 0 }, quality: { score: ${score} } }; renderControls();`, context);
   return { element, context };
@@ -60,6 +62,7 @@ test('Manual start captures a baseline and counts a persistent change', () => {
   const { element, context } = app(44, 1);
   context.createBoardSampler = () => ({});
   context.sampleBoard = image => image.values;
+  context.createBoardSampler = () => ({});
   context.prepareMotionFrame = image => image;
   context.createMotionReference = () => ({});
   context.estimateCameraShift = () => ({ x: 0, y: 0, error: 0 });
@@ -98,4 +101,56 @@ test('A locked automatic bull projection is not overwritten by rescanning', () =
   assert.equal(frames, 1);
   assert.equal(vm.runInContext('mode', context), 'watching');
   assert.equal(vm.runInContext('locked.x', context), 100);
+});
+
+test('A broad occlusion pauses without counting a person', () => {
+  const { element, context } = app();
+  context.createBoardSampler = () => ({});
+  context.prepareMotionFrame = image => image;
+  context.createMotionReference = () => ({});
+  context.estimateCameraShift = () => ({ x: 0, y: 0, error: 0 });
+  context.sampleBoard = image => image.values;
+  element('sensitivity').value = '3'; element('lock').onclick();
+  vm.runInContext(`
+    const empty = { values: new Float32Array(1000).fill(100) };
+    for (let i = 0; i < 12; i++) watch(empty);
+    const person = { values: new Float32Array(1000).fill(100) };
+    person.values.fill(160, 0, 100);
+    for (let i = 0; i < 3; i++) watch(person);
+  `, context);
+  assert.equal(vm.runInContext('mode', context), 'clearing');
+  assert.equal(vm.runInContext('count', context), 0);
+  assert.equal(element('reset').dataset.state, 'paused');
+});
+test('Removing a counted dart pauses instead of adding another hit', () => {
+  const { element, context } = app();
+  context.createBoardSampler = () => ({});
+  context.prepareMotionFrame = image => image;
+  context.createMotionReference = () => ({});
+  context.estimateCameraShift = () => ({ x: 0, y: 0, error: 0 });
+  context.sampleBoard = image => image.values;
+  element('sensitivity').value = '3'; element('lock').onclick();
+  vm.runInContext(`
+    const empty = { values: new Float32Array(1000).fill(100) };
+    const hit = { values: new Float32Array(1000).fill(100) }; hit.values.fill(160, 0, 10);
+    for (let i = 0; i < 12; i++) watch(empty);
+    for (let i = 0; i < 12; i++) watch(hit);
+    lastEvent = 0;
+    for (let i = 0; i < 12; i++) watch(empty);
+  `, context);
+  assert.equal(vm.runInContext('mode', context), 'clearing');
+  assert.equal(vm.runInContext('count', context), 1);
+  element('reset').onclick();
+  assert.equal(vm.runInContext('count', context), 0);
+  assert.equal(vm.runInContext('mode', context), 'watching');
+});
+test('Changing zoom pauses and redetects while preserving the count', () => {
+  const { element, context } = app(); element('lock').onclick();
+  vm.runInContext('count = 2;', context);
+  element('zoom').value = '2'; element('zoom').oninput();
+  assert.equal(vm.runInContext('mode', context), 'positioning');
+  assert.equal(vm.runInContext('locked', context), null);
+  assert.equal(vm.runInContext('count', context), 2);
+  assert.equal(element('zoom-value').textContent, '2.0×');
+  assert.equal(element('lock').disabled, true);
 });

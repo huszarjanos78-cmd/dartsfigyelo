@@ -21,7 +21,7 @@ export function sameBoard(a, b, tolerance = 0.08) {
 // until the camera is repositioned; bilinear sampling avoids nearest-pixel jumps.
 // This corrects elliptical foreshortening, not a calibrated full perspective.
 export function createBoardSampler(width, height, e, size = 192) {
-  const indices = [], weights = [], c = Math.cos(e.angle), s = Math.sin(e.angle);
+  const indices = [], weights = [], gridPositions = [], c = Math.cos(e.angle), s = Math.sin(e.angle);
   for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
     const u = (2 * (x + 0.5) / size - 1) * 0.98;
     const v = (2 * (y + 0.5) / size - 1) * 0.98;
@@ -31,15 +31,18 @@ export function createBoardSampler(width, height, e, size = 192) {
     const py = clamp(projected.y, 0, height - 1);
     const ix = Math.min(Math.floor(px), width - 2), iy = Math.min(Math.floor(py), height - 2);
     indices.push((iy * width + ix) * 4);
+    gridPositions.push(y * size + x);
     weights.push(px - ix, py - iy);
   }
-  return { width, height, indices: new Int32Array(indices), weights: new Float32Array(weights) };
+  return { width, height, size, gridPositions: new Int32Array(gridPositions), indices: new Int32Array(indices), weights: new Float32Array(weights) };
 }
 export function sampleBoard(image, map, dx = 0, dy = 0) {
   if (image.width !== map.width || image.height !== map.height) throw new Error('Camera dimensions changed');
   image = prepareMotionFrame(image);
   const values = new Float32Array(map.indices.length), stride = image.width * 4;
   values.edgeNoise = new Float32Array(values.length);
+  values.gridPositions = map.gridPositions;
+  values.gridSize = map.size;
   const gray = i => image.gray[i / 4];
   for (let n = 0; n < values.length; n++) {
     let i = map.indices[n], fx = map.weights[n * 2], fy = map.weights[n * 2 + 1];

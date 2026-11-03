@@ -7,7 +7,7 @@ iPhone-on, Safariban használható, kamerás dartnyíl-érzékelő prototípus.
 ## Mit tud most?
 
 - Hátsó kamera indítása és leállítása.
-- A tábla körvonalának automatikus felismerése a gyűrűk és a húsz váltakozó szektor alapján, ellipszisillesztéssel.
+- A tábla körvonalának automatikus felismerése a húsz váltakozó szektor, valamint a piros-zöld dupla- és triplagyűrű színe és egymáshoz viszonyított helyzete alapján, ellipszisillesztéssel. A külső szivacskeret önmagában nem megfelelő jelölt.
 - Élő kameraállás-mutató (0–100%), külön méret-, rálátási szög-, élesség-, megvilágítás- és körvonalértékeléssel.
 - Beállítási tanácsok; a figyelés felismert körvonalnál kézzel indítható. Az 55% alatti kameraállás figyelmeztetés, nem indítási tiltás.
 - Tartós képi változás észlelése a felismert ellipszisen belül.

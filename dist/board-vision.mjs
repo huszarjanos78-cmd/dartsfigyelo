@@ -187,6 +187,40 @@ function contourEllipse(cv, contour, w, h) {
   if (error > 0.13 || bins.size < 17) return null;
   e.fit = clamp(1 - error / 0.16) * bins.size / 24; return e;
 }
+
+// A surround can contain the sector pattern, but its edge does not have the
+// double/triple rings at the correct radii. Require both colours around both rings.
+export function scoringRingEvidence(image, e) {
+  const bands = [];
+  for (let r = .4; r <= 1.04; r += .02) {
+    let red = 0, green = 0;
+    for (let i = 0; i < 120; i++) {
+      let hasRed = false, hasGreen = false;
+      for (const offset of [-.025, 0, .025]) {
+        const p = ellipsePoint(e, r + offset, i * Math.PI / 60);
+        const x = Math.round(p.x), y = Math.round(p.y);
+        if (x < 0 || x >= image.width || y < 0 || y >= image.height) continue;
+        const j = (y * image.width + x) * 4;
+        const a = image.data[j], b = image.data[j + 1], c = image.data[j + 2];
+        if (a > b * 1.25 && a > c * 1.2 && a - b > 18) hasRed = true;
+        if (b > a * 1.15 && b > c * 1.1 && b - a > 12) hasGreen = true;
+      }
+      if (hasRed) red++;
+      if (hasGreen) green++;
+    }
+    bands.push({ r, support: Math.min(red, green) / 60 });
+  }
+  let best = 0;
+  for (const outer of bands) {
+    if (outer.r < .74 || outer.support < .22) continue;
+    for (const inner of bands) {
+      const ratio = inner.r / outer.r;
+      if (ratio < .55 || ratio > .69) continue;
+      best = Math.max(best, Math.min(outer.support, inner.support));
+    }
+  }
+  return best;
+}
 export function placementQuality(gray, w, h, e, confidence = 1) {
   const ex = Math.hypot(e.a * Math.cos(e.angle), e.b * Math.sin(e.angle));
   const ey = Math.hypot(e.a * Math.sin(e.angle), e.b * Math.cos(e.angle));
@@ -255,6 +289,7 @@ export function detectBoard(cv, image) {
     const ranked = [];
     for (const e of candidates) {
       const spokes = spokePattern(gray.data, w, h, e);
+      if (spokes < .5 || scoringRingEvidence(image, e) < .22) continue;
       const rings = candidates.filter(other => other !== e && Math.hypot(other.x - e.x, other.y - e.y) < e.a * 0.09 &&
         other.a / e.a > 0.22 && other.a / e.a < 0.92 && Math.abs(other.a / e.a - other.b / e.b) < 0.14).length;
       const confidence = 0.55 * spokes + 0.25 * e.fit + 0.2 * Math.min(1, rings / 2);

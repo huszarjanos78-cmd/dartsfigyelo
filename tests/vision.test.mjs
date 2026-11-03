@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { detectBoard, placementQuality, createBoardSampler, sampleBoard, sameBoard, createMotionReference, estimateCameraShift, frameDifference } from '../dist/board-vision.mjs';
+import { detectBoard, placementQuality, createBoardSampler, sampleBoard, sameBoard, createMotionReference, estimateCameraShift, frameDifference, scoringRingEvidence } from '../dist/board-vision.mjs';
 const require = createRequire(import.meta.url);
 const cvModule = require('../dist/vendor/opencv.js');
 const { cv } = await new Promise(resolve => cvModule.then(lib => resolve({ cv: lib })));
 
-export function scene({ x = 240, y = 180, a = 145, b = 145, angle = 0, plain = false, empty = false, brightness = 1, surround = 1, surroundShade = 65, dart = false } = {}) {
+export function scene({ x = 240, y = 180, a = 145, b = 145, angle = 0, plain = false, empty = false, brightness = 1, surround = 1, surroundShade = 65, dart = false, stripedSurround = false } = {}) {
   const width = 480, height = 360, data = new Uint8ClampedArray(width * height * 4);
   for (let py = 0; py < height; py++) for (let px = 0; px < width; px++) {
     const dx = px - x, dy = py - y, c = Math.cos(angle), s = Math.sin(angle);
@@ -14,6 +14,7 @@ export function scene({ x = 240, y = 180, a = 145, b = 145, angle = 0, plain = f
     const sector = Math.floor(theta * 20 / (2 * Math.PI)), even = sector % 2 === 0;
     let rgb = [150, 158, 163];
     if (!empty && r < surround) rgb = [surroundShade, surroundShade + 1, surroundShade + 3];
+    if (!empty && stripedSurround && r >= 1 && r < surround) rgb = even ? [180, 180, 180] : [30, 30, 30];
     if (!empty && r < 1) {
       rgb = [24, 25, 24];
       if (!plain && r < 0.79) {
@@ -54,6 +55,25 @@ assert.ok(small, 'A small board should still provide positioning feedback');
 assert.ok(small.quality.score <= 54, 'Small board must request a closer position before starting');
 assert.equal(detectBoard(cv, scene({ empty: true })), null, 'Blank background must not be a board');
 assert.equal(detectBoard(cv, scene({ plain: true })), null, 'A plain circle must not be a dartboard');
+const narrowSurround = detectBoard(cv, scene({ a: 125, b: 90, surround: 1.1, angle: .3 }));
+assert.ok(narrowSurround && Math.abs(narrowSurround.ellipse.a - 125) < 6, 'Even a nearby foam edge must not replace the dartboard rim');
+for (const axisRatio of [1, .72]) {
+  const image = scene({ a: 95, b: 95 * axisRatio, angle: .3, surround: 1.6, stripedSurround: true });
+  const found = detectBoard(cv, image);
+  assert.ok(found && found.ellipse.a > 95 * .7 && found.ellipse.a < 95 * 1.1, 'A misleading sector-like surround must be rejected');
+  const board = { x: 240, y: 180, a: 95, b: 95 * axisRatio, angle: .3 };
+  assert.ok(scoringRingEvidence(image, board) >= .22, 'The real double and triple rings must pass');
+  assert.ok(scoringRingEvidence(image, { ...board, a: board.a * 1.6, b: board.b * 1.6 }) < .22, 'Foam must fail ring-position validation even with sector texture');
+}
+const missingTriple = scene();
+for (let y = 0; y < missingTriple.height; y++) for (let x = 0; x < missingTriple.width; x++) {
+  const radius = Math.hypot(x - 240, y - 180) / 145;
+  if (radius < .4 || radius > .55) continue;
+  const i = (y * missingTriple.width + x) * 4;
+  const value = missingTriple.data[i] * .299 + missingTriple.data[i + 1] * .587 + missingTriple.data[i + 2] * .114;
+  missingTriple.data[i] = missingTriple.data[i + 1] = missingTriple.data[i + 2] = value;
+}
+assert.equal(detectBoard(cv, missingTriple), null, 'A single coloured ring must not validate an outline');
 for (const surround of [1.25, 1.5, 1.75]) {
   for (const axisRatio of [1, 0.72]) {
     const image = scene({ a: 95, b: 95 * axisRatio, angle: 0.3, surround });
@@ -140,4 +160,4 @@ assert.ok(estimateCameraShift(scene({ b: 100, angle: .4, x: 260 }), motionRefere
 const shiftedHit = scene({ x: 242, y: 179, b: 100, angle: .4, dart: true });
 const hitAlignment = estimateCameraShift(shiftedHit, motionReference);
 assert.ok(frameDifference(sampleBoard(shiftedHit, sampler, hitAlignment.x, hitAlignment.y), steadyValues).ratio > .0035, 'A dart arriving with a small camera shift must remain detectable');
-console.log(JSON.stringify({ checks: 108, frontal: front.quality.score, tilted: tilted.quality.score, small: small.quality.score, sharpness: [sharpQuality.details.sharpness, blurredQuality.details.sharpness] }));
+console.log(JSON.stringify({ checks: 116, frontal: front.quality.score, tilted: tilted.quality.score, small: small.quality.score, sharpness: [sharpQuality.details.sharpness, blurredQuality.details.sharpness] }));

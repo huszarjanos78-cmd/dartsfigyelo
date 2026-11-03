@@ -1,4 +1,4 @@
-import { detectBoard, sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference } from './board-vision.mjs';
+import { detectBoard, sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference } from './board-vision.mjs?v=0.3.3';
 
 const $ = id => document.getElementById(id);
 const video = $('video'), overlay = $('overlay'), ctx = overlay.getContext('2d');
@@ -61,7 +61,7 @@ function showQuality(result) {
   $('quality').textContent = score + '%'; $('quality-bar').style.width = score + '%';
   $('quality-panel').dataset.level = score >= 75 ? 'good' : score >= 55 ? 'fair' : 'poor';
   $('quality-title').textContent = !result ? 'Tábla keresése' : score >= 75 ? 'Jó kameraállás' : score >= 55 ? 'Használható, még javítható' : 'Igazíts a telefon helyzetén';
-  $('quality-tip').textContent = result ? result.quality.tips[0] : 'Mutasd a teljes táblát. A körvonal és a mezők legyenek élesen láthatók.';
+  $('quality-tip').textContent = result ? result.quality.tips[0] : 'Mutasd a teljes táblát. A piros-zöld dupla- és triplagyűrű is látszódjon élesen.';
   for (const name of metrics) $('metric-' + name).textContent = result ? Math.round(result.quality.details[name] * 100) + '%' : '—';
 }
 function draw() {

@@ -14,8 +14,8 @@ export function sameBoard(a, b, tolerance = 0.08) {
 }
 function sample(gray, w, h, x, y) { return gray[clamp(Math.round(y), 0, h - 1) * w + clamp(Math.round(x), 0, w - 1)]; }
 function spokePattern(gray, w, h, e) {
-  const scores = [];
-  for (const r of [0.38, 0.5, 0.62, 0.72, 0.86]) {
+  const scores = [], outerScores = [];
+  for (const r of [0.38, 0.5, 0.62, 0.65, 0.7, 0.86]) {
     const values = [];
     for (let i = 0; i < 180; i++) {
       const p = ellipsePoint(e, r, i * Math.PI / 90); values.push(sample(gray, w, h, p.x, p.y));
@@ -29,8 +29,15 @@ function spokePattern(gray, w, h, e) {
       if (sign) { if (!first) first = sign; if (last && last !== sign) transitions++; last = sign; }
     }
     if (first && last && first !== last) transitions++;
-    scores.push(clamp(1 - Math.abs(transitions - 20) / 12) * clamp((sd - 12) / 28));
+    const score = clamp(1 - Math.abs(transitions - 20) / 12) * clamp((sd - 12) / 28);
+    scores.push(score);
+    if (r === 0.65 || r === 0.7) outerScores.push(score);
   }
+  // A standard board's scoring area reaches roughly 75% of its physical radius.
+  // Sampling only the strongest inner rings also accepts a larger foam surround
+  // containing a real board. Require sector evidence near the expected outer
+  // scoring area before allowing that contour to participate in ranking.
+  if (Math.min(...outerScores) < 0.5) return 0;
   scores.sort((a, b) => b - a);
   return scores[0] * 0.65 + scores[1] * 0.35;
 }

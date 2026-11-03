@@ -40,18 +40,17 @@ async function keepAwake() {
   try { if (!wake || wake.released) wake = await navigator.wakeLock?.request('screen'); } catch { /* Optional on iPhone. */ }
 }
 function resetComparison() { baseline = null; previous = null; stableFrames = 0; lastEvent = 0; }
-const minimumStartQuality = 55;
+const recommendedStartQuality = 55;
 function canStartWatching() {
-  return !!stream && mode === 'positioning' && !!candidate && stableBoards >= 3 && candidate.quality.score >= minimumStartQuality;
+  return !!stream && mode === 'positioning' && !!candidate;
 }
 function renderControls() {
   $('start').textContent = stream ? 'Kamera leállítása' : 'Kamera bekapcsolása ↗';
   $('lock').hidden = !stream || mode === 'watching' || mode === 'clearing';
   $('lock').disabled = !canStartWatching();
   $('lock-hint').hidden = $('lock').hidden;
-  $('lock-hint').textContent = !candidate ? 'Keresem a táblát. A figyelés stabil körvonalnál, 55%-tól indítható.' :
-    stableBoards < 3 ? 'Tartsd mozdulatlanul a telefont, amíg a körvonal stabil lesz. Indítás 55%-tól.' :
-    candidate.quality.score < minimumStartQuality ? `Kameraállás: ${candidate.quality.score}%. Az indításhoz legalább 55% szükséges.` :
+  $('lock-hint').textContent = !candidate ? 'Keresem a táblát. A figyelés a körvonal megjelenése után indítható.' :
+    candidate.quality.score < recommendedStartQuality ? `Indítható · Kameraállás: ${candidate.quality.score}%. Gyenge képminőség: a jelzés bizonytalanabb lehet.` :
     `Indítható · Kameraállás: ${candidate.quality.score}%. Rögzítsd a telefont, és indítsd a figyelést.`;
   $('calibrate').hidden = !stream || mode === 'positioning';
   $('reset').disabled = !stream || !locked || mode === 'positioning';
@@ -96,7 +95,7 @@ function scanBoard(image) {
   if (mode === 'positioning') {
     stableBoards = result && sameBoard(result.ellipse, previousCandidate, 0.06) ? stableBoards + 1 : result ? 1 : 0;
     previousCandidate = result?.ellipse || null; candidate = result; showQuality(result); draw(); renderControls();
-    status(!result ? 'Nem látom biztosan a dartstáblát. Igazíts a kamerán.' : stableBoards < 3 ? 'Tábla megtalálva. Tartsd mozdulatlanul a telefont…' : result.quality.score >= 55 ? 'A körvonal megvan. Rögzítsd a telefont, majd indítsd a figyelést.' : 'A tábla megvan, de a kameraálláson még javítani kell.', result?.quality.score >= 55 ? 'good' : 'warn');
+    status(!result ? 'Nem látom biztosan a dartstáblát. Igazíts a kamerán.' : 'A körvonal megvan. Rögzítsd a telefont, majd indítsd a figyelést.', result?.quality.score >= recommendedStartQuality ? 'good' : 'warn');
   } else if (mode === 'watching') {
     if (result && sameBoard(locked, result.ellipse, 0.1)) { lostBoards = 0; candidate = result; showQuality(result); draw(); }
     else lostBoards++;

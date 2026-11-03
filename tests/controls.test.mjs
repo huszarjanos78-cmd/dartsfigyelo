@@ -30,28 +30,49 @@ for (const score of [55, 74, 86, 99, 100]) {
     assert.equal(element('lock-hint').hidden, true);
   });
 }
-test('Below 55%, the reason is displayed and the handler cannot start', () => {
+test('Below 55%, a warning is displayed but manual watching can start', () => {
   const { element, context } = app(54);
-  assert.equal(element('lock').disabled, true);
-  assert.match(element('lock-hint').textContent, /legalább 55%/);
+  assert.equal(element('lock').disabled, false);
+  assert.match(element('lock-hint').textContent, /Gyenge képminőség/);
   element('lock').onclick();
-  assert.equal(vm.runInContext('mode', context), 'positioning');
+  assert.equal(vm.runInContext('mode', context), 'watching');
 });
-test('A high score still needs a stable board', () => {
-  const { element, context } = app(100, 2);
-  assert.equal(element('lock').disabled, true);
-  assert.match(element('lock-hint').textContent, /stabil/);
+test('A freshly found outline can be locked without waiting for three matches', () => {
+  const { element, context } = app(74, 1);
+  assert.equal(element('lock').disabled, false);
+  assert.match(element('lock-hint').textContent, /Indítható/);
   element('lock').onclick();
-  assert.equal(vm.runInContext('mode', context), 'positioning');
+  assert.equal(vm.runInContext('mode', context), 'watching');
 });
 test('Missing board or stopped camera cannot start watching', () => {
   const { element, context } = app();
   vm.runInContext('candidate = null; renderControls();', context);
   assert.equal(element('lock').disabled, true);
   assert.match(element('lock-hint').textContent, /Keresem/);
+  element('lock').onclick();
+  assert.equal(vm.runInContext('mode', context), 'positioning');
   vm.runInContext('stream = null; renderControls();', context);
   assert.equal(element('lock').hidden, true);
   assert.equal(element('lock-hint').hidden, true);
+});
+test('Manual start captures a baseline and counts a persistent change', () => {
+  const { element, context } = app(44, 1);
+  context.createBoardSampler = () => ({});
+  context.sampleBoard = image => image.values;
+  element('sensitivity').value = '3';
+  element('lock').onclick();
+  vm.runInContext(`
+    const emptyFrame = { values: new Float32Array(1000).fill(100) };
+    for (let i = 0; i < 12; i++) watch(emptyFrame);
+  `, context);
+  assert.match(element('status').textContent, /Figyelek/);
+  vm.runInContext(`
+    const hitFrame = { values: new Float32Array(1000).fill(100) };
+    hitFrame.values.fill(160, 0, 10);
+    for (let i = 0; i < 12; i++) watch(hitFrame);
+  `, context);
+  assert.equal(vm.runInContext('count', context), 1);
+  assert.match(element('status').textContent, /Nyíl érzékelve/);
 });
 test('Start-watching control and hint appear above the camera exactly once', () => {
   const html = readFileSync(new URL('../dist/index.html', import.meta.url), 'utf8');

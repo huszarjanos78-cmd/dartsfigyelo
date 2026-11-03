@@ -7,3 +7,4 @@ Thumbs.db
 *.log
 .sites-runtime/
 .sites-checkout/
+dist/vendor/opencv.js

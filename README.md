@@ -47,6 +47,18 @@ Ez letölti az OpenCV.js 4.13.0 hivatalos, ellenőrzőösszeggel rögzített fá
 
 ## Helyi előnézet
 
+### Oldalról elhelyezett kamera
+
+A kamera kb. 1 méterre, kb. 45 fokban oldalról is elhelyezhető. A teljes tábla
+férjen a képbe, és a keskenyebb irányban is legyen elég nagy és éles. A távolságot
+a program nem méri; a látható méretet és képminőséget ellenőrzi.
+A figyelés a rögzített ellipszis alapján kör alakú, állandó méretű mintavételi
+területen hasonlítja össze a képkockákat, bilineáris interpolációval.
+Ez az ellipszis összenyomódását kompenzálja, nem teljes, kalibrált perspektivikus
+rekonstrukció. A szintetikus tesztek 35–50 fokos nézeteket, valamint 45 fokos,
+1 méteres pinhole-vetítést is tartalmaznak. Valós iPhone-os dobáspróba továbbra is kell;
+egy kamera képén az egymást takaró nyilak nem mindig különíthetők el.
+
 Ha Python telepítve van, a projekt gyökerében:
 
 ```sh

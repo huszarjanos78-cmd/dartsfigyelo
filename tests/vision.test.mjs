@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { detectBoard, placementQuality } from '../dist/board-vision.mjs';
+import { detectBoard, placementQuality, createBoardSampler, sampleBoard, sameBoard } from '../dist/board-vision.mjs';
 const require = createRequire(import.meta.url);
 const cvModule = require('../dist/vendor/opencv.js');
 const { cv } = await new Promise(resolve => cvModule.then(lib => resolve({ cv: lib })));
 
-export function scene({ x = 240, y = 180, a = 145, b = 145, angle = 0, plain = false, empty = false, brightness = 1, surround = 1, surroundShade = 65 } = {}) {
+export function scene({ x = 240, y = 180, a = 145, b = 145, angle = 0, plain = false, empty = false, brightness = 1, surround = 1, surroundShade = 65, dart = false } = {}) {
   const width = 480, height = 360, data = new Uint8ClampedArray(width * height * 4);
   for (let py = 0; py < height; py++) for (let px = 0; px < width; px++) {
     const dx = px - x, dy = py - y, c = Math.cos(angle), s = Math.sin(angle);
@@ -23,6 +23,7 @@ export function scene({ x = 240, y = 180, a = 145, b = 145, angle = 0, plain = f
         if (Math.min(...[0.035, 0.08, 0.46, 0.5, 0.74, 0.79].map(edge => Math.abs(r - edge))) < 0.004) rgb = [170, 170, 160];
       }
     }
+    if (dart && u > 0.1 && u < 0.5 && v > 0.1 && v < 0.18) rgb = [8, 8, 8];
     const i = (py * width + px) * 4;
     for (let k = 0; k < 3; k++) data[i + k] = rgb[k] * brightness;
     data[i + 3] = 255;
@@ -75,4 +76,48 @@ const sharpQuality = placementQuality(gray(scene()), 480, 360, front.ellipse);
 const blurredQuality = placementQuality(gray(blurred(scene())), 480, 360, front.ellipse);
 assert.ok(blurredQuality.details.sharpness < sharpQuality.details.sharpness, 'Blur must lower sharpness');
 assert.ok(placementQuality(gray(scene()), 480, 360, { ...front.ellipse, x: 40 }).score <= 44, 'Clipped board cannot be rated ready');
-console.log(JSON.stringify({ checks: 36, frontal: front.quality.score, tilted: tilted.quality.score, small: small.quality.score, sharpness: [sharpQuality.details.sharpness, blurredQuality.details.sharpness] }));
+for (const degrees of [35, 45, 50]) {
+  for (const rotation of [0, Math.PI / 2, 0.4]) {
+    const b = 145 * Math.cos(degrees * Math.PI / 180);
+    const image = scene({ b, angle: rotation });
+    const result = detectBoard(cv, image);
+    assert.ok(result, `${degrees}-degree side view must be detected at rotation ${rotation}`);
+    assert.ok(Math.abs(result.ellipse.a - 145) < 12 && Math.abs(result.ellipse.b - b) < 12, 'Side-view outline must match');
+    assert.ok(result.quality.score >= 55, 'Supported side view must allow watching');
+    assert.ok(!result.quality.tips.some(tip => tip.includes('szembe')), 'Side view must not request a frontal camera');
+    if (degrees === 45) assert.ok(result.quality.score >= 75, 'A well-framed 45-degree view must be rated good');
+  }
+}
+const referenceEllipse = { x: 240, y: 180, a: 145, b: 145, angle: 0 };
+const reference = sampleBoard(scene(), createBoardSampler(480, 360, referenceEllipse));
+for (const rotation of [0, Math.PI / 2, 0.4]) {
+  const e = { ...referenceEllipse, b: 145 * Math.SQRT1_2, angle: rotation };
+  const image = scene({ b: e.b, angle: rotation });
+  const map = createBoardSampler(480, 360, e), normalized = sampleBoard(image, map);
+  assert.equal(normalized.length, reference.length, 'Normalized sampling area must be independent of side view');
+  const error = normalized.reduce((sum, v, i) => sum + Math.abs(v - reference[i]), 0) / reference.length;
+  assert.ok(error < 12, `Rectified board must match frontal board: error ${error}`);
+  assert.deepEqual(sampleBoard(image, map), normalized, 'A stationary image must produce no artificial changes');
+  const hit = sampleBoard(scene({ b: e.b, angle: rotation, dart: true }), map);
+  const meanChange = hit.reduce((sum, value, i) => sum + value - normalized[i], 0) / hit.length;
+  const changeRatio = hit.reduce((sum, value, i) => sum + (Math.abs(value - normalized[i] - meanChange) > 24 ? 1 : 0), 0) / hit.length;
+  assert.ok(changeRatio > 0.0035 && changeRatio < 0.14, 'A persistent dart-shaped change in a side view must cross the normal detection threshold');
+}
+// Pinhole projection of a 45 cm board at about 1 m and a 45-degree side angle.
+// Unlike simple ellipse scaling, this includes the near/far perspective difference.
+for (const side of [-1, 1]) {
+  const image = scene(), src = cv.matFromImageData(image), dst = new cv.Mat();
+  const k = side * Math.sin(Math.PI / 4) * 0.225 / 145, c = Math.SQRT1_2;
+  const matrix = cv.matFromArray(3, 3, cv.CV_64F, [c + 240 * k, 0, 240 * (1 - 240 * k - c), 180 * k, 1, -180 * k * 240, k, 0, 1 - 240 * k]);
+  try {
+    cv.warpPerspective(src, dst, matrix, new cv.Size(480, 360), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(150, 158, 163, 255));
+    const result = detectBoard(cv, { width: 480, height: 360, data: new Uint8ClampedArray(dst.data) });
+    assert.ok(result, 'A 1 m, 45-degree perspective view must be found from either side');
+    assert.ok(result.quality.score >= 55, 'Perspective view must allow watching');
+  } finally { src.delete(); dst.delete(); matrix.delete(); }
+}
+const e = { ...referenceEllipse, b: 100 };
+assert.equal(sameBoard(e, { ...e, angle: 0.35 }), false, 'Rotating an oblique camera must require recalibration');
+assert.equal(sameBoard(e, { ...e, angle: Math.PI }), true, 'Equivalent ellipse angles must not trigger recalibration');
+assert.throws(() => sampleBoard({ width: 240, height: 180 }, createBoardSampler(480, 360, e)), /dimensions/, 'Changed frame dimensions must not reuse an old sampling map');
+console.log(JSON.stringify({ checks: 94, frontal: front.quality.score, tilted: tilted.quality.score, small: small.quality.score, sharpness: [sharpQuality.details.sharpness, blurredQuality.details.sharpness] }));

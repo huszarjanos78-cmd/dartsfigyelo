@@ -10,7 +10,37 @@ export function insideEllipse(e, x, y, scale = 1) {
 }
 export function sameBoard(a, b, tolerance = 0.08) {
   return !!a && !!b && Math.hypot(a.x - b.x, a.y - b.y) < a.a * tolerance &&
-    Math.abs(a.a - b.a) / a.a < tolerance && Math.abs(a.b - b.b) / a.b < tolerance;
+    Math.abs(a.a - b.a) / a.a < tolerance && Math.abs(a.b - b.b) / a.b < tolerance &&
+    (a.b / a.a > 0.92 && b.b / b.a > 0.92 || Math.abs(Math.sin(a.angle - b.angle)) < tolerance * 2);
+}
+
+// Rectify a locked ellipse onto a fixed circular sampling grid. Cache this map
+// until the camera is repositioned; bilinear sampling avoids nearest-pixel jumps.
+// This corrects elliptical foreshortening, not a calibrated full perspective.
+export function createBoardSampler(width, height, e, size = 192) {
+  const indices = [], weights = [], c = Math.cos(e.angle), s = Math.sin(e.angle);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const u = (2 * (x + 0.5) / size - 1) * 0.98;
+    const v = (2 * (y + 0.5) / size - 1) * 0.98;
+    if (u * u + v * v > 0.98 ** 2) continue;
+    const px = clamp(e.x + e.a * u * c - e.b * v * s, 0, width - 1);
+    const py = clamp(e.y + e.a * u * s + e.b * v * c, 0, height - 1);
+    const ix = Math.min(Math.floor(px), width - 2), iy = Math.min(Math.floor(py), height - 2);
+    indices.push((iy * width + ix) * 4);
+    weights.push(px - ix, py - iy);
+  }
+  return { width, height, indices: new Int32Array(indices), weights: new Float32Array(weights) };
+}
+export function sampleBoard(image, map) {
+  if (image.width !== map.width || image.height !== map.height) throw new Error('Camera dimensions changed');
+  const values = new Float32Array(map.indices.length), data = image.data, stride = image.width * 4;
+  const gray = i => data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+  for (let n = 0; n < values.length; n++) {
+    const i = map.indices[n], fx = map.weights[n * 2], fy = map.weights[n * 2 + 1];
+    values[n] = (gray(i) * (1 - fx) + gray(i + 4) * fx) * (1 - fy) +
+      (gray(i + stride) * (1 - fx) + gray(i + stride + 4) * fx) * fy;
+  }
+  return values;
 }
 function sample(gray, w, h, x, y) { return gray[clamp(Math.round(y), 0, h - 1) * w + clamp(Math.round(x), 0, w - 1)]; }
 function spokePattern(gray, w, h, e) {
@@ -66,7 +96,9 @@ export function placementQuality(gray, w, h, e, confidence = 1) {
   const ey = Math.hypot(e.a * Math.sin(e.angle), e.b * Math.cos(e.angle));
   const margin = Math.min(e.x - ex, w - e.x - ex, e.y - ey, h - e.y - ey);
   const sizeRatio = 2 * e.b / Math.min(w, h), size = clamp((sizeRatio - 0.2) / 0.46);
-  const angle = clamp((e.b / e.a - 0.38) / 0.56);
+  // A 45-degree side view has an axis ratio of about cos(45°) = 0.71.
+  // It is a supported position; continue requiring enough pixels on the short axis.
+  const angle = clamp((e.b / e.a - 0.45) / 0.25);
   let visible = 0;
   for (let i = 0; i < 120; i++) {
     const p = ellipsePoint(e, 1, i * Math.PI / 60);
@@ -87,11 +119,11 @@ export function placementQuality(gray, w, h, e, confidence = 1) {
   let score = Math.round((size * 0.27 + angle * 0.25 + sharpness * 0.22 + lighting * 0.12 + framing * 0.14) * 100);
   if (visible < 116 || margin < 0 || sizeRatio < 0.32 || e.b / e.a < 0.52) score = Math.min(score, 44);
   if (sizeRatio < 0.46 || e.b / e.a < 0.6) score = Math.min(score, 54);
-  else if (sizeRatio < 0.58 || e.b / e.a < 0.75) score = Math.min(score, 74);
+  else if (sizeRatio < 0.55 || e.b / e.a < 0.65) score = Math.min(score, 74);
   if (confidence < 0.6) score = Math.min(score, 49);
   const tips = [];
   if (framing < 0.85) tips.push('Lépj hátrébb vagy igazítsd középre: a teljes tábla férjen a képbe.');
-  if (angle < 0.7) tips.push('Fordítsd szembe a kamerát a táblával. Túl nagy az oldalirányú dőlés.');
+  if (angle < 0.7) tips.push('Túl lapos a rálátás. Közelíts a kb. 45 fokos oldalnézethez; a teljes tábla maradjon látható.');
   if (size < 0.65) tips.push('Menj közelebb: a tábla nagyobb részt töltsön ki a képből.');
   if (sharpness < 0.55) tips.push('Rögzítsd a telefont, és várd meg, amíg a kép éles lesz.');
   if (lighting < 0.7) tips.push('Világítsd meg egyenletesebben a táblát, csillogás nélkül.');

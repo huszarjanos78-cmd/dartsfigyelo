@@ -1,4 +1,4 @@
-import { detectBoard, sameBoard, insideEllipse } from './board-vision.mjs';
+import { detectBoard, sameBoard, createBoardSampler, sampleBoard } from './board-vision.mjs';
 
 const $ = id => document.getElementById(id);
 const video = $('video'), overlay = $('overlay'), ctx = overlay.getContext('2d');
@@ -6,7 +6,7 @@ const frame = document.createElement('canvas'), fc = frame.getContext('2d', { wi
 const metrics = ['size', 'angle', 'sharpness', 'lighting', 'framing'];
 let stream = null, cv, cvLoading, mode = 'off', candidate = null, locked = null;
 let previousCandidate = null, stableBoards = 0, lostBoards = 0, baseline, previous, stableFrames = 0;
-let count = 0, lastEvent = 0, timer, wake, lastScan = 0, recentHit = 0, generation = 0, pixelMask;
+let count = 0, lastEvent = 0, timer, wake, lastScan = 0, recentHit = 0, generation = 0, boardSampler;
 
 function status(text, state = '') {
   $('status').textContent = text;
@@ -67,7 +67,7 @@ function draw() {
   ctx.restore();
 }
 function position() {
-  mode = 'positioning'; locked = null; pixelMask = null; previousCandidate = null; candidate = null; stableBoards = 0; lostBoards = 0;
+  mode = 'positioning'; locked = null; boardSampler = null; previousCandidate = null; candidate = null; stableBoards = 0; lostBoards = 0;
   count = 0; $('count').textContent = '0'; resetComparison(); showQuality(null); draw(); renderControls();
   status('A tábla körvonalát automatikusan keresem…');
 }
@@ -95,18 +95,10 @@ function scanBoard(image) {
   }
 }
 function pixels(image) {
-  if (!pixelMask) {
-    const indices = [];
-    for (let y = 0; y < image.height; y++) for (let x = 0; x < image.width; x++)
-      if (insideEllipse(locked, x, y, 0.98)) indices.push((y * image.width + x) * 4);
-    pixelMask = new Int32Array(indices);
-  }
-  const data = image.data, values = new Float32Array(pixelMask.length);
-  for (let n = 0; n < pixelMask.length; n++) {
-    const i = pixelMask[n]; values[n] = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-  }
-  return values;
+  if (!boardSampler) boardSampler = createBoardSampler(image.width, image.height, locked);
+  return sampleBoard(image, boardSampler);
 }
+
 function difference(a, b) {
   let mean = 0; for (let i = 0; i < a.length; i++) mean += a[i] - b[i]; mean /= a.length;
   let changed = 0, total = 0;
@@ -139,7 +131,7 @@ function tick() {
 function stop() {
   generation++; clearInterval(timer);
   const old = stream; stream = null; old?.getTracks().forEach(track => track.stop());
-  video.srcObject = null; mode = 'off'; pixelMask = null; locked = candidate = previousCandidate = null;
+  video.srcObject = null; mode = 'off'; boardSampler = null; locked = candidate = previousCandidate = null;
   resetComparison(); stableBoards = 0; count = 0; $('count').textContent = '0';
   wake?.release().catch(() => {}); wake = null; $('placeholder').hidden = false; $('live').textContent = 'KAMERA KIKAPCSOLVA';
   showQuality(null); draw(); renderControls(); status('Kamera leállítva.');
@@ -161,7 +153,7 @@ $('start').onclick = async () => {
 };
 $('lock').onclick = () => {
   if (!candidate || stableBoards < 3 || candidate.quality.score < 55) return;
-  locked = { ...candidate.ellipse }; pixelMask = null; mode = 'watching'; lostBoards = 0; resetComparison(); draw(); renderControls();
+  locked = { ...candidate.ellipse }; boardSampler = null; mode = 'watching'; lostBoards = 0; resetComparison(); draw(); renderControls();
   status('Lépj ki a képből. Az üres tábla alaphelyzetét rögzítem…'); speak('Figyelés indítása');
 };
 $('calibrate').onclick = position;

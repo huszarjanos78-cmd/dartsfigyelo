@@ -31,16 +31,112 @@ export function createBoardSampler(width, height, e, size = 192) {
   }
   return { width, height, indices: new Int32Array(indices), weights: new Float32Array(weights) };
 }
-export function sampleBoard(image, map) {
+export function sampleBoard(image, map, dx = 0, dy = 0) {
   if (image.width !== map.width || image.height !== map.height) throw new Error('Camera dimensions changed');
-  const values = new Float32Array(map.indices.length), data = image.data, stride = image.width * 4;
-  const gray = i => data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+  image = prepareMotionFrame(image);
+  const values = new Float32Array(map.indices.length), stride = image.width * 4;
+  values.edgeNoise = new Float32Array(values.length);
+  const gray = i => image.gray[i / 4];
   for (let n = 0; n < values.length; n++) {
-    const i = map.indices[n], fx = map.weights[n * 2], fy = map.weights[n * 2 + 1];
+    let i = map.indices[n], fx = map.weights[n * 2], fy = map.weights[n * 2 + 1];
+    if (dx || dy) {
+      const x = clamp((i % stride) / 4 + fx + dx, 0, image.width - 1);
+      const y = clamp(Math.floor(i / stride) + fy + dy, 0, image.height - 1);
+      const ix = Math.min(Math.floor(x), image.width - 2), iy = Math.min(Math.floor(y), image.height - 2);
+      i = (iy * image.width + ix) * 4; fx = x - ix; fy = y - iy;
+    }
     values[n] = (gray(i) * (1 - fx) + gray(i + 4) * fx) * (1 - fy) +
       (gray(i + stride) * (1 - fx) + gray(i + stride + 4) * fx) * fy;
+    values.edgeNoise[n] = .6 * (Math.abs(gray(i + 4) - gray(i)) + Math.abs(gray(i + stride) - gray(i)));
   }
   return values;
+}
+
+export function frameDifference(a, b) {
+  let mean = 0;
+  for (let i = 0; i < a.length; i++) mean += a[i] - b[i];
+  mean /= a.length;
+  let changed = 0, total = 0;
+  for (let i = 0; i < a.length; i++) {
+    const delta = Math.abs(a[i] - b[i] - mean);
+    const uncertainty = Math.max(a.edgeNoise?.[i] || 0, b.edgeNoise?.[i] || 0);
+    total += Math.max(0, delta - uncertainty);
+    if (delta > 24 + uncertainty) changed++;
+  }
+  return { ratio: changed / a.length, mean: total / a.length };
+}
+
+export function prepareMotionFrame(image) {
+  if (image.gray) return image;
+  const { width, height, data } = image, gray = new Float32Array(width * height);
+  const horizontal = new Float32Array(gray.length), smooth = new Float32Array(gray.length);
+  for (let i = 0; i < gray.length; i++) gray[i] = data[i * 4] * .299 + data[i * 4 + 1] * .587 + data[i * 4 + 2] * .114;
+  // A small separable Gaussian reduces sensor noise and subpixel edge flicker.
+  const weights = [1, 4, 6, 4, 1];
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    let sum = 0;
+    for (let k = -2; k <= 2; k++) sum += gray[y * width + clamp(x + k, 0, width - 1)] * weights[k + 2];
+    horizontal[y * width + x] = sum / 16;
+  }
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    let sum = 0;
+    for (let k = -2; k <= 2; k++) sum += horizontal[clamp(y + k, 0, height - 1) * width + x] * weights[k + 2];
+    smooth[y * width + x] = sum / 16;
+  }
+  return { width, height, gray: smooth };
+}
+
+function grayAt(image, x, y) {
+  x = clamp(x, 0, image.width - 1); y = clamp(y, 0, image.height - 1);
+  const ix = Math.min(Math.floor(x), image.width - 2), iy = Math.min(Math.floor(y), image.height - 2);
+  const fx = x - ix, fy = y - iy, i = (iy * image.width + ix) * 4, row = image.width * 4;
+  const g = index => image.gray[index / 4];
+  return (g(i) * (1 - fx) + g(i + 4) * fx) * (1 - fy) + (g(i + row) * (1 - fx) + g(i + row + 4) * fx) * fy;
+}
+export function createMotionReference(image, ellipse) {
+  image = prepareMotionFrame(image);
+  const points = [], values = [];
+  // Spread samples over the whole board, so a local dart or a hand does not
+  // become the camera-motion estimate. Keep this reference fixed for the round.
+  for (let y = -8; y <= 8; y++) for (let x = -8; x <= 8; x++) {
+    if (x * x + y * y > 64) continue;
+    const p = ellipsePoint(ellipse, Math.hypot(x, y) / 9, Math.atan2(y, x));
+    points.push(p.x, p.y); values.push(grayAt(image, p.x, p.y));
+  }
+  return { width: image.width, height: image.height, points, values };
+}
+export function estimateCameraShift(image, reference, limit = 4) {
+  image = prepareMotionFrame(image);
+  if (image.width !== reference.width || image.height !== reference.height) throw new Error('Camera dimensions changed');
+  const diffs = new Float32Array(reference.values.length);
+  function error(dx, dy) {
+    let mean = 0;
+    for (let i = 0; i < diffs.length; i++) {
+      diffs[i] = grayAt(image, reference.points[i * 2] + dx, reference.points[i * 2 + 1] + dy) - reference.values[i];
+      mean += diffs[i];
+    }
+    mean /= diffs.length;
+    let total = 0;
+    // Limit the influence of local changes, while retaining global movement.
+    for (const d of diffs) total += Math.min(30, Math.abs(d - mean));
+    return total / diffs.length;
+  }
+  const zero = error(0, 0);
+  let best = { x: 0, y: 0, error: zero };
+  for (let y = -limit; y <= limit; y++) for (let x = -limit; x <= limit; x++) {
+    const score = error(x, y);
+    if (score < best.error) best = { x, y, error: score };
+  }
+  for (const step of [0.5, 0.25]) {
+    const center = best;
+    for (let y = -1; y <= 1; y++) for (let x = -1; x <= 1; x++) {
+      const dx = center.x + x * step, dy = center.y + y * step;
+      if (Math.abs(dx) > limit || Math.abs(dy) > limit) continue;
+      const score = error(dx, dy);
+      if (score < best.error) best = { x: dx, y: dy, error: score };
+    }
+  }
+  return zero - best.error < 0.25 ? { x: 0, y: 0, error: zero } : best;
 }
 function sample(gray, w, h, x, y) { return gray[clamp(Math.round(y), 0, h - 1) * w + clamp(Math.round(x), 0, w - 1)]; }
 function spokePattern(gray, w, h, e) {

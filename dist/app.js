@@ -1,4 +1,4 @@
-import { detectBoard, sameBoard, createBoardSampler, sampleBoard } from './board-vision.mjs';
+import { detectBoard, sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference } from './board-vision.mjs';
 
 const $ = id => document.getElementById(id);
 const video = $('video'), overlay = $('overlay'), ctx = overlay.getContext('2d');
@@ -6,7 +6,7 @@ const frame = document.createElement('canvas'), fc = frame.getContext('2d', { wi
 const metrics = ['size', 'angle', 'sharpness', 'lighting', 'framing'];
 let stream = null, cv, cvLoading, mode = 'off', candidate = null, locked = null;
 let previousCandidate = null, stableBoards = 0, lostBoards = 0, baseline, previous, stableFrames = 0;
-let count = 0, lastEvent = 0, timer, wake, lastScan = 0, recentHit = 0, generation = 0, boardSampler;
+let count = 0, lastEvent = 0, timer, wake, lastScan = 0, recentHit = 0, generation = 0, boardSampler, motionReference;
 
 function status(text, state = '') {
   $('status').textContent = text;
@@ -39,7 +39,7 @@ function loadVision() {
 async function keepAwake() {
   try { if (!wake || wake.released) wake = await navigator.wakeLock?.request('screen'); } catch { /* Optional on iPhone. */ }
 }
-function resetComparison() { baseline = null; previous = null; stableFrames = 0; lastEvent = 0; }
+function resetComparison() { motionReference = null; baseline = null; previous = null; stableFrames = 0; lastEvent = 0; }
 const recommendedStartQuality = 55;
 function canStartWatching() {
   return !!stream && mode === 'positioning' && !!candidate;
@@ -102,19 +102,23 @@ function scanBoard(image) {
     if (lostBoards >= 3) { position(); status('A tábla eltűnt vagy a telefon elmozdult. Állítsd be újra a kamerát.', 'warn'); }
   }
 }
-function pixels(image) {
+function pixels(image, shift) {
   if (!boardSampler) boardSampler = createBoardSampler(image.width, image.height, locked);
-  return sampleBoard(image, boardSampler);
+  return sampleBoard(image, boardSampler, shift.x, shift.y);
 }
 
-function difference(a, b) {
-  let mean = 0; for (let i = 0; i < a.length; i++) mean += a[i] - b[i]; mean /= a.length;
-  let changed = 0, total = 0;
-  for (let i = 0; i < a.length; i++) { const delta = Math.abs(a[i] - b[i] - mean); total += delta; if (delta > 24) changed++; }
-  return { ratio: changed / a.length, mean: total / a.length };
-}
+const difference = frameDifference;
+
 function watch(image) {
-  const values = pixels(image); if (!values.length) return;
+  image = prepareMotionFrame(image);
+  if (!motionReference) motionReference = createMotionReference(image, locked);
+  const shift = estimateCameraShift(image, motionReference);
+  if (shift.error > 10) {
+    previous = null; stableFrames = 0;
+    status('A kamera elmozdult vagy a tábla takarásban van. Várok a nyugodt képre…');
+    return;
+  }
+  const values = pixels(image, shift); if (!values.length) return;
   if (!previous || previous.length !== values.length) { previous = values; return; }
   const motion = difference(values, previous); previous = values;
   if (motion.ratio > 0.004 || motion.mean > 2.8) { stableFrames = 0; status('Mozgás a táblánál. Várok a nyugodt képre…'); return; }

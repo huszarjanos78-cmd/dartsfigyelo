@@ -54,6 +54,9 @@ férjen a képbe, és a keskenyebb irányban is legyen elég nagy és éles. A t
 a program nem méri; a látható méretet és képminőséget ellenőrzi.
 A figyelés a rögzített ellipszis alapján kör alakú, állandó méretű mintavételi
 területen hasonlítja össze a képkockákat, bilineáris interpolációval.
+Az apró kameraremegést képkocka-illesztés kompenzálja (a feldolgozott képen legfeljebb 4 pixel eltolásig),
+Gaussian-szűréssel és az élek környékén zajtűrő összehasonlítással. A nagyobb, nem illeszthető
+elmozdulás továbbra is szünetelteti az észlelést.
 Ez az ellipszis összenyomódását kompenzálja, nem teljes, kalibrált perspektivikus
 rekonstrukció. A szintetikus tesztek 35–50 fokos nézeteket, valamint 45 fokos,
 1 méteres pinhole-vetítést is tartalmaznak. Valós iPhone-os dobáspróba továbbra is kell;

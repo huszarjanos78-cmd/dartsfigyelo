@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import vm from 'node:vm';
+import { frameDifference } from '../dist/board-vision.mjs';
 
 // Exercise the actual UI handlers without requiring a physical camera.
 const source = readFileSync(new URL('../dist/app.js', import.meta.url), 'utf8').replace(/^import .*;\n/, '');
@@ -12,7 +13,7 @@ function app(score = 55, stable = 3) {
     if (!elements.has(id)) elements.set(id, { style: {}, checked: false, dataset: {}, getContext: () => drawing });
     return elements.get(id);
   };
-  const context = vm.createContext({ document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
+  const context = vm.createContext({ frameDifference, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
   vm.runInContext(source, context);
   vm.runInContext(`stream = {}; mode = 'positioning'; stableBoards = ${stable}; candidate = { ellipse: { x: 100, y: 100, a: 80, b: 60, angle: 0 }, quality: { score: ${score} } }; renderControls();`, context);
   return { element, context };
@@ -59,6 +60,9 @@ test('Manual start captures a baseline and counts a persistent change', () => {
   const { element, context } = app(44, 1);
   context.createBoardSampler = () => ({});
   context.sampleBoard = image => image.values;
+  context.prepareMotionFrame = image => image;
+  context.createMotionReference = () => ({});
+  context.estimateCameraShift = () => ({ x: 0, y: 0, error: 0 });
   element('sensitivity').value = '3';
   element('lock').onclick();
   vm.runInContext(`

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { detectBoard, placementQuality, createBoardSampler, sampleBoard, sameBoard } from '../dist/board-vision.mjs';
+import { detectBoard, placementQuality, createBoardSampler, sampleBoard, sameBoard, createMotionReference, estimateCameraShift, frameDifference } from '../dist/board-vision.mjs';
 const require = createRequire(import.meta.url);
 const cvModule = require('../dist/vendor/opencv.js');
 const { cv } = await new Promise(resolve => cvModule.then(lib => resolve({ cv: lib })));
@@ -99,6 +99,7 @@ for (const rotation of [0, Math.PI / 2, 0.4]) {
   assert.ok(error < 12, `Rectified board must match frontal board: error ${error}`);
   assert.deepEqual(sampleBoard(image, map), normalized, 'A stationary image must produce no artificial changes');
   const hit = sampleBoard(scene({ b: e.b, angle: rotation, dart: true }), map);
+  assert.ok(frameDifference(hit, normalized).ratio > .0035, 'Noise filtering must preserve a real dart-shaped change');
   const meanChange = hit.reduce((sum, value, i) => sum + value - normalized[i], 0) / hit.length;
   const changeRatio = hit.reduce((sum, value, i) => sum + (Math.abs(value - normalized[i] - meanChange) > 24 ? 1 : 0), 0) / hit.length;
   assert.ok(changeRatio > 0.0035 && changeRatio < 0.14, 'A persistent dart-shaped change in a side view must cross the normal detection threshold');
@@ -120,4 +121,23 @@ const e = { ...referenceEllipse, b: 100 };
 assert.equal(sameBoard(e, { ...e, angle: 0.35 }), false, 'Rotating an oblique camera must require recalibration');
 assert.equal(sameBoard(e, { ...e, angle: Math.PI }), true, 'Equivalent ellipse angles must not trigger recalibration');
 assert.throws(() => sampleBoard({ width: 240, height: 180 }, createBoardSampler(480, 360, e)), /dimensions/, 'Changed frame dimensions must not reuse an old sampling map');
-console.log(JSON.stringify({ checks: 94, frontal: front.quality.score, tilted: tilted.quality.score, small: small.quality.score, sharpness: [sharpQuality.details.sharpness, blurredQuality.details.sharpness] }));
+const steady = scene({ b: 100, angle: .4 });
+const steadyEllipse = { ...referenceEllipse, b: 100, angle: .4 };
+const motionReference = createMotionReference(steady, steadyEllipse);
+const sampler = createBoardSampler(480, 360, steadyEllipse);
+const steadyValues = sampleBoard(steady, sampler);
+for (const [dx, dy] of [[1, 0], [-2, 1], [3, -3], [0.5, -0.75]]) {
+  const moved = scene({ x: 240 + dx, y: 180 + dy, b: 100, angle: .4 });
+  const shift = estimateCameraShift(moved, motionReference);
+  assert.ok(Math.abs(shift.x - dx) <= .5 && Math.abs(shift.y - dy) <= .5, `Small camera shift must be recovered: ${JSON.stringify(shift)}`);
+  const corrected = sampleBoard(moved, sampler, shift.x, shift.y);
+  const delta = frameDifference(corrected, steadyValues);
+  assert.ok(delta.ratio < .0035 && delta.mean < 2.8, `Compensated jitter must neither count nor pause: ${dx},${dy}: ${JSON.stringify(delta)}`);
+}
+const dartShift = estimateCameraShift(scene({ b: 100, angle: .4, dart: true }), motionReference);
+assert.ok(Math.abs(dartShift.x) <= .25 && Math.abs(dartShift.y) <= .25, 'A local dart must not be mistaken for camera motion');
+assert.ok(estimateCameraShift(scene({ b: 100, angle: .4, x: 260 }), motionReference).error > 10, 'Large uncorrectable movement must be rejected');
+const shiftedHit = scene({ x: 242, y: 179, b: 100, angle: .4, dart: true });
+const hitAlignment = estimateCameraShift(shiftedHit, motionReference);
+assert.ok(frameDifference(sampleBoard(shiftedHit, sampler, hitAlignment.x, hitAlignment.y), steadyValues).ratio > .0035, 'A dart arriving with a small camera shift must remain detectable');
+console.log(JSON.stringify({ checks: 108, frontal: front.quality.score, tilted: tilted.quality.score, small: small.quality.score, sharpness: [sharpQuality.details.sharpness, blurredQuality.details.sharpness] }));

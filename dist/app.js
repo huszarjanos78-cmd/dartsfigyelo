@@ -1,14 +1,13 @@
-import { zoomCrop } from './camera-view.mjs?v=0.7';
-import { inspectBoardChange, looksLikeRemoval } from './retrieval-guard.mjs?v=0.7';
-import { detectBullBoard } from './bull-vision.mjs?v=0.7';
-import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint } from './board-vision.mjs?v=0.7';
+import { zoomCrop } from './camera-view.mjs?v=0.7.1';
+import { inspectBoardChange, looksLikeRemoval } from './retrieval-guard.mjs?v=0.7.1';
+import { detectBullBoard } from './bull-vision.mjs?v=0.7.1';
+import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint } from './board-vision.mjs?v=0.7.1';
 
 const $ = id => document.getElementById(id);
 const video = $('video'), overlay = $('overlay'), ctx = overlay.getContext('2d');
 const frame = document.createElement('canvas'), fc = frame.getContext('2d', { willReadFrequently: true });
 const preview = $('preview'), pc = preview.getContext('2d');
 let zoom = 1, zoomFocus = { x: .5, y: .5 }, previewRequest, emptyBaseline = null, occlusionFrames = 0, recovery = null;
-const metrics = ['size', 'angle', 'sharpness', 'lighting', 'framing'];
 let stream = null, cv, cvLoading, mode = 'off', candidate = null, locked = null;
 let previousCandidate = null, stableBoards = 0, lostBoards = 0, baseline, previous, stableFrames = 0;
 let count = 0, lastEvent = 0, timer, wake, lastScan = 0, recentHit = 0, generation = 0, boardSampler, motionReference;
@@ -56,10 +55,9 @@ function renderControls() {
   $('lock').hidden = !stream || mode === 'watching' || mode === 'clearing';
   $('lock').disabled = !canStartWatching();
   $('lock-hint').hidden = $('lock').hidden;
-  $('quality-panel').hidden = !cv;
   $('lock-hint').textContent = !candidate ? 'Keresem a piros bullt és a pontozó gyűrűket. A teljes tábla látszódjon.' :
-    candidate.quality.score < recommendedStartQuality ? `Indítható · Kameraállás: ${candidate.quality.score}%. Gyenge képminőség: a jelzés bizonytalanabb lehet.` :
-    `Indítható · Bull és gyűrűk megtalálva · ${candidate.quality.score}%. Ellenőrizd a célkeresztet, majd indítsd a figyelést.`;
+    candidate.quality.score < recommendedStartQuality ? 'Indítható. Gyenge képminőség: a jelzés bizonytalanabb lehet.' :
+    'Indítható · Bull és gyűrűk megtalálva. Ellenőrizd a célkeresztet, majd indítsd a figyelést.';
   $('calibrate').hidden = !stream;
   $('calibrate').textContent = 'Tábla újrakeresése';
   $('reset').disabled = !stream || !locked || mode === 'positioning';
@@ -67,12 +65,11 @@ function renderControls() {
 }
 function showQuality(result) {
   const score = result?.quality.score ?? 0;
-  $('quality').textContent = score + '%'; $('quality-bar').style.width = score + '%';
-  $('quality-panel').dataset.level = score >= 75 ? 'good' : score >= 55 ? 'fair' : 'poor';
-  $('quality-title').textContent = !result ? 'Tábla keresése' : score >= 75 ? 'Jó kameraállás' : score >= 55 ? 'Használható, még javítható' : 'Igazíts a telefon helyzetén';
-  $('quality-tip').textContent = result ? result.quality.tips[0] : 'Mutasd a teljes táblát. A piros-zöld dupla- és triplagyűrű is látszódjon élesen.';
-  for (const name of metrics) $('metric-' + name).textContent = result ? Math.round(result.quality.details[name] * 100) + '%' : '—';
+  $('quality').textContent = score + '%';
+  $('quality').ariaLabel = 'Kameraállás becslése: ' + score + '%';
+  $('quality').dataset.level = score >= 75 ? 'good' : score >= 55 ? 'fair' : 'poor';
 }
+
 function draw() {
   ctx.clearRect(0, 0, overlay.width, overlay.height);
   const e = locked || candidate?.ellipse;

@@ -36,6 +36,8 @@ jobs:
         run: node tests/controls.test.mjs
       - name: Test zoom and retrieval guard
         run: node tests/camera-safety.test.mjs
+      - name: Test small persistent hits
+        run: node tests/small-hit.test.mjs
       - name: Test manual perspective calibration
         run: node tests/calibration.test.mjs
       - name: Upload website

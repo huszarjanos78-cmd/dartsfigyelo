@@ -1,13 +1,14 @@
-import { zoomCrop } from './camera-view.mjs?v=0.7.1';
-import { inspectBoardChange, looksLikeRemoval } from './retrieval-guard.mjs?v=0.7.1';
-import { detectBullBoard } from './bull-vision.mjs?v=0.7.1';
-import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint } from './board-vision.mjs?v=0.7.1';
+import { smallHitEvidence, confirmSmallHit } from './hit-evidence.mjs?v=0.8';
+import { zoomCrop } from './camera-view.mjs?v=0.8';
+import { inspectBoardChange, looksLikeRemoval } from './retrieval-guard.mjs?v=0.8';
+import { detectBullBoard } from './bull-vision.mjs?v=0.8';
+import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint } from './board-vision.mjs?v=0.8';
 
 const $ = id => document.getElementById(id);
 const video = $('video'), overlay = $('overlay'), ctx = overlay.getContext('2d');
 const frame = document.createElement('canvas'), fc = frame.getContext('2d', { willReadFrequently: true });
 const preview = $('preview'), pc = preview.getContext('2d');
-let zoom = 1, zoomFocus = { x: .5, y: .5 }, previewRequest, emptyBaseline = null, occlusionFrames = 0, recovery = null;
+let zoom = 1, zoomFocus = { x: .5, y: .5 }, previewRequest, emptyBaseline = null, occlusionFrames = 0, recovery = null, smallCandidate = null;
 let stream = null, cv, cvLoading, mode = 'off', candidate = null, locked = null;
 let previousCandidate = null, stableBoards = 0, lostBoards = 0, baseline, previous, stableFrames = 0;
 let count = 0, lastEvent = 0, timer, wake, lastScan = 0, recentHit = 0, generation = 0, boardSampler, motionReference;
@@ -43,7 +44,7 @@ function loadVision() {
 async function keepAwake() {
   try { if (!wake || wake.released) wake = await navigator.wakeLock?.request('screen'); } catch { /* Optional on iPhone. */ }
 }
-function resetComparison() { recovery = null; emptyBaseline = null; occlusionFrames = 0; motionReference = null; baseline = null; previous = null; stableFrames = 0; lastEvent = 0; }
+function resetComparison() { smallCandidate = null; recovery = null; emptyBaseline = null; occlusionFrames = 0; motionReference = null; baseline = null; previous = null; stableFrames = 0; lastEvent = 0; }
 const recommendedStartQuality = 55;
 function canStartWatching() {
   return !!stream && mode === 'positioning' && !!candidate;
@@ -126,7 +127,7 @@ function recoverRound(original) {
   const image = prepareMotionFrame(original), shift = estimateCameraShift(image, recovery.reference);
   if (shift.error > 10) { recovery.stable = 0; return; }
   const values = pixels(image, shift), delta = difference(values, recovery.empty);
-  if (delta.ratio > .001 || delta.mean > 1.5) {
+  if (delta.ratio > .001 || delta.mean > 1.5 || smallHitEvidence(values, recovery.empty, 5)) {
     recovery.stable = 0;
     status('Nyílkiszedés folyamatban. Várom, hogy a tábla újra üres és takarásmentes legyen.', 'warn');
     return;
@@ -170,13 +171,14 @@ function watch(image) {
   if (shift.error > 10) {
     if (!baseline) { motionReference = null; previous = null; stableFrames = 0; status('Az alaphelyzethez lépj ki a képből, és várd meg a nyugodt táblát.'); return; }
     if (++occlusionFrames >= 3) { pauseForRetrieval('Takarás vagy nagy kameraelmozdulás.'); return; }
-    previous = null; stableFrames = 0;
+    smallCandidate = null; previous = null; stableFrames = 0;
     status('A kamera elmozdult vagy a tábla takarásban van. Ha nem áll helyre, koppints a Tábla újrakeresése gombra.');
     return;
   }
   const values = pixels(image, shift); if (!values.length) return;
   const change = baseline ? inspectBoardChange(values, baseline) : null;
   if (change?.obstructed) {
+    smallCandidate = null;
     previous = null; stableFrames = 0;
     if (++occlusionFrames >= 3) pauseForRetrieval('Nagy, összefüggő takarás a táblánál.');
     else status('Takarás a táblánál. Nem számolok találatot.', 'warn');
@@ -185,7 +187,7 @@ function watch(image) {
   occlusionFrames = 0;
   if (!previous || previous.length !== values.length) { previous = values; return; }
   const motion = difference(values, previous); previous = values;
-  if (motion.ratio > 0.004 || motion.mean > 2.8) { stableFrames = 0; status('Mozgás a táblánál. Várok a nyugodt képre…'); return; }
+  if (motion.ratio > 0.004 || motion.mean > 2.8) { smallCandidate = null; stableFrames = 0; status('Mozgás a táblánál. Várok a nyugodt képre…'); return; }
   if (++stableFrames < 10) return;
   if (!baseline) {
     if (cv) {
@@ -199,11 +201,13 @@ function watch(image) {
     baseline = emptyBaseline = values; status('Figyelek. Jöhet a dobás!', 'good'); return;
   }
   const delta = change, threshold = [0.009, 0.006, 0.0035, 0.002, 0.0012][Number($('sensitivity').value) - 1];
-  if (count > 0 && delta.ratio > threshold && looksLikeRemoval(values, baseline, emptyBaseline)) {
+  smallCandidate = confirmSmallHit(smallCandidate, smallHitEvidence(values, baseline, Number($('sensitivity').value)));
+  const detected = delta.ratio > threshold || (smallCandidate?.frames ?? 0) >= 3;
+  if (count > 0 && detected && looksLikeRemoval(values, baseline, emptyBaseline)) {
     pauseForRetrieval('Nyílkiszedéshez hasonló változás.'); return;
   }
-  if (delta.ratio > threshold && Date.now() - lastEvent > 2200) {
-    $('count').textContent = ++count; baseline = values; lastEvent = recentHit = Date.now(); stableFrames = 0;
+  if (detected && Date.now() - lastEvent > 2200) {
+    $('count').textContent = ++count; smallCandidate = null; baseline = values; lastEvent = recentHit = Date.now(); stableFrames = 0;
     status('Nyíl érzékelve · ' + count + '. találat', 'good'); speak('Nyíl érzékelve');
   } else if (Date.now() - recentHit > 2500) status('Figyelek. Jöhet a dobás!', 'good');
 }

@@ -15,7 +15,7 @@ iPhone-on, Safariban használható, kamerás dartnyíl-érzékelő prototípus.
 - Magyar hangos jelzés és nyílszámláló.
 - Állítható érzékenység és szüneteltetés a nyilak kiszedéséhez.
 
-0.7 változat: nincs szükség a tábla kézi bejelölésére. A kamera bekapcsolása után
+0.8 változat: nincs szükség a tábla kézi bejelölésére. A kamera bekapcsolása után
 várd meg a bull és a pontozó gyűrűk felismerését. Ellenőrizd a célkeresztet és a
 külső dupla gyűrűt követő keretet, majd indítsd a figyelést. A kameraállás százaléka
 képi jellemzőkből számított beállítási becslés, nem felismerési pontosság.
@@ -130,3 +130,18 @@ A **Nyilak kiszedése** gomb tartalék kézi szünetként megmarad. A szünetben
 megnyomva kézi folytatást ad, ha az automatikus visszaállás nem sikerül. A kép
 összehasonlítása nem tanított ember- vagy nyílfelismerés: kis nyílszerű takarás,
 árnyék, kameramozgás és egymást fedő nyilak továbbra is okozhatnak hibát.
+
+## Kis nyílváltozások érzékelése (0.8)
+
+A simított szürkeárnyalatos mozgásellenőrzés mellett külön, elmosatlan RGB-színjel
+is megmarad a kalibrált pontozóterületen. Kis, helyhez kötött változást csak három
+egymást követő stabil képen fogad el; a már meglévő táblaszélek körül zajtűrést
+alkalmaz. Így a globális érzékenység csökkentése nélkül is felismerhet olyan kis
+tollat, amelynek szürkeárnyalatos területváltozása a korábbi küszöb alatt maradt.
+A takarásvizsgálat és az automatikus új kör megmarad; az új színjel a kiszedés
+és az üres tábla ellenőrzésében is részt vesz.
+
+A tesztek vékony nyílszárat, kis színes tollat, szürkeárnyalatban azonos fényességű
+színváltozást, egyszeri zajt, expozícióváltást és kompenzált remegést tartalmaznak.
+Ezek nem adnak százalékos pontossági becslést a valódi dobásokra; azt új
+iPhone-os tesztsorozattal kell ellenőrizni.

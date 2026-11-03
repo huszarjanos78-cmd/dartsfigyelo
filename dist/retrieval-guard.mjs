@@ -1,4 +1,5 @@
 import { frameDifference } from './board-vision.mjs?v=0.7';
+import { fineChangeRatio } from './hit-evidence.mjs?v=0.8';
 
 // Reject broad occlusions, rather than trying to identify a person from one camera.
 export function inspectBoardChange(current, baseline) {
@@ -39,5 +40,7 @@ export function looksLikeRemoval(current, baseline, empty) {
   if (!empty) return false;
   const change = frameDifference(current, baseline).ratio;
   const improvement = frameDifference(baseline, empty).ratio - frameDifference(current, empty).ratio;
-  return improvement > .001 && improvement > change * .35;
+  if (improvement > .001 && improvement > change * .35) return true;
+  const fineImprovement = fineChangeRatio(baseline, empty) - fineChangeRatio(current, empty);
+  return fineImprovement > .0003 && fineImprovement > fineChangeRatio(current, baseline) * .35;
 }

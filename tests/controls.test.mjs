@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import vm from 'node:vm';
+import { smallHitEvidence, confirmSmallHit } from '../dist/hit-evidence.mjs';
 import { inspectBoardChange, looksLikeRemoval } from '../dist/retrieval-guard.mjs';
 import { zoomCrop } from '../dist/camera-view.mjs';
+import { createBoardSampler, sampleBoard } from '../dist/board-vision.mjs';
 import { frameDifference, buildCalibration, ellipsePoint, sameBoard } from '../dist/board-vision.mjs';
 
 // Exercise the actual UI handlers without requiring a physical camera.
@@ -15,7 +17,7 @@ function app(score = 55, stable = 3) {
     if (!elements.has(id)) elements.set(id, { style: {}, checked: false, dataset: {}, getContext: () => drawing });
     return elements.get(id);
   };
-  const context = vm.createContext({ inspectBoardChange, looksLikeRemoval, zoomCrop, frameDifference, buildCalibration, ellipsePoint, sameBoard, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
+  const context = vm.createContext({ smallHitEvidence, confirmSmallHit, inspectBoardChange, looksLikeRemoval, zoomCrop, frameDifference, buildCalibration, ellipsePoint, sameBoard, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
   vm.runInContext(source, context);
   vm.runInContext(`stream = {}; mode = 'positioning'; stableBoards = ${stable}; candidate = { ellipse: { x: 100, y: 100, a: 80, b: 60, angle: 0 }, quality: { score: ${score} } }; renderControls();`, context);
   return { element, context };
@@ -208,4 +210,31 @@ test('Automatic resume requires the bull and scoring ring to be visible', () => 
   context.detectBullBoard = () => ({ ellipse: { x: 100, y: 100, a: 80, b: 60, angle: 0 } });
   vm.runInContext('for (let i = 0; i < 10; i++) recoverRound(empty);', context);
   assert.equal(vm.runInContext('mode', context), 'watching');
+});
+test('A small colour-only hit is confirmed, not double-counted, and must be removed before auto-reset', () => {
+  const width = 192, height = 192, data = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0; i < data.length; i += 4) { data[i] = data[i + 1] = data[i + 2] = 100; data[i + 3] = 255; }
+  const changed = new Uint8ClampedArray(data);
+  // Nearly identical luminance, visibly different colour: the old grayscale
+  // difference cannot detect this small flight.
+  for (let y = 110; y < 130; y++) for (let x = 110; x < 113; x++) changed.set([20, 130, 156], (y * width + x) * 4);
+  const map = createBoardSampler(width, height, { x: 96, y: 96, a: 90, b: 90, angle: 0 });
+  const empty = sampleBoard({ width, height, data }, map), hit = sampleBoard({ width, height, data: changed }, map);
+  assert.equal(frameDifference(hit, empty).ratio, 0);
+  assert.equal(looksLikeRemoval(empty, hit, empty), true, 'A colour-only dart removal must not become a new hit');
+  const { element, context } = app();
+  context.createBoardSampler = () => ({}); context.prepareMotionFrame = image => image;
+  context.createMotionReference = () => ({}); context.estimateCameraShift = () => ({ x: 0, y: 0, error: 0 });
+  context.sampleBoard = image => image.values;
+  context.emptyImage = { values: empty }; context.hitImage = { values: hit };
+  element('sensitivity').value = '3'; element('lock').onclick();
+  vm.runInContext('for(let i=0;i<12;i++)watch(emptyImage); watch(hitImage); watch(emptyImage); watch(hitImage); watch(hitImage);', context);
+  assert.equal(vm.runInContext('count', context), 0, 'One-frame changes must not count');
+  vm.runInContext('watch(hitImage); for(let i=0;i<15;i++)watch(hitImage);', context);
+  assert.equal(vm.runInContext('count', context), 1);
+  vm.runInContext("pauseForRetrieval('Takarás'); for(let i=0;i<15;i++)recoverRound(hitImage);", context);
+  assert.equal(vm.runInContext('mode', context), 'clearing', 'A remaining fine hit must prevent premature reset');
+  vm.runInContext('for(let i=0;i<10;i++)recoverRound(emptyImage);', context);
+  assert.equal(vm.runInContext('mode', context), 'watching');
+  assert.equal(vm.runInContext('count', context), 0);
 });

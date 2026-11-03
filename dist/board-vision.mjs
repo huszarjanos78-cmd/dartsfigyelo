@@ -43,6 +43,10 @@ export function sampleBoard(image, map, dx = 0, dy = 0) {
   values.edgeNoise = new Float32Array(values.length);
   values.gridPositions = map.gridPositions;
   values.gridSize = map.size;
+  if (image.rgba) {
+    values.fine = new Float32Array(values.length * 3);
+    values.fineNoise = new Float32Array(values.length);
+  }
   const gray = i => image.gray[i / 4];
   for (let n = 0; n < values.length; n++) {
     let i = map.indices[n], fx = map.weights[n * 2], fy = map.weights[n * 2 + 1];
@@ -55,6 +59,16 @@ export function sampleBoard(image, map, dx = 0, dy = 0) {
     values[n] = (gray(i) * (1 - fx) + gray(i + 4) * fx) * (1 - fy) +
       (gray(i + stride) * (1 - fx) + gray(i + stride + 4) * fx) * fy;
     values.edgeNoise[n] = .6 * (Math.abs(gray(i + 4) - gray(i)) + Math.abs(gray(i + stride) - gray(i)));
+    if (image.rgba) {
+      const d = image.rgba, left = i % stride >= 4 ? i - 4 : i, up = i >= stride ? i - stride : i;
+      for (let channel = 0; channel < 3; channel++) {
+        values.fine[n * 3 + channel] = (d[i + channel] * (1 - fx) + d[i + 4 + channel] * fx) * (1 - fy) +
+          (d[i + stride + channel] * (1 - fx) + d[i + stride + 4 + channel] * fx) * fy;
+        values.fineNoise[n] = Math.max(values.fineNoise[n], Math.abs(d[i + channel] - d[left + channel]),
+          Math.abs(d[i + channel] - d[up + channel]), Math.abs(d[i + channel] - d[i + 4 + channel]),
+          Math.abs(d[i + channel] - d[i + stride + channel]));
+      }
+    }
   }
   return values;
 }
@@ -90,7 +104,7 @@ export function prepareMotionFrame(image) {
     for (let k = -2; k <= 2; k++) sum += horizontal[clamp(y + k, 0, height - 1) * width + x] * weights[k + 2];
     smooth[y * width + x] = sum / 16;
   }
-  return { width, height, gray: smooth };
+  return { width, height, gray: smooth, rgba: data };
 }
 
 function grayAt(image, x, y) {

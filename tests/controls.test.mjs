@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { frameDifference, buildCalibration, ellipsePoint } from '../dist/board-vision.mjs';
 
 // Exercise the actual UI handlers without requiring a physical camera.
-const source = readFileSync(new URL('../dist/app.js', import.meta.url), 'utf8').replace(/^import .*;\n/, '');
+const source = readFileSync(new URL('../dist/app.js', import.meta.url), 'utf8').replace(/^import .*;\n/gm, '');
 function app(score = 55, stable = 3) {
   const elements = new Map();
   const drawing = Object.fromEntries(['clearRect', 'save', 'restore', 'setLineDash', 'beginPath', 'ellipse', 'stroke', 'moveTo', 'lineTo', 'arc', 'fillText'].map(name => [name, () => {}]));
@@ -37,38 +37,6 @@ test('Below 55%, a warning is displayed but manual watching can start', () => {
   assert.match(element('lock-hint').textContent, /Gyenge képminőség/);
   element('lock').onclick();
   assert.equal(vm.runInContext('mode', context), 'watching');
-});
-test('Five taps enable manual watching with an exact bull and undo support', () => {
-  const { element, context } = app();
-  const overlay = element('overlay'); overlay.width = 480; overlay.height = 360;
-  overlay.getBoundingClientRect = () => ({ left: 10, top: 20, width: 240, height: 180 });
-  element('video').videoWidth = 1280;
-  element('calibrate').onclick();
-  assert.equal(element('lock').disabled, true);
-  const taps = [[240, 180], [240, 60], [340, 180], [240, 300], [140, 180]];
-  const tap = ([x, y]) => overlay.onclick({ clientX: 10 + x / 2, clientY: 20 + y / 2 });
-  taps.forEach(tap);
-  assert.equal(element('lock').disabled, false);
-  assert.equal(vm.runInContext('candidate.ellipse.x', context), 240);
-  assert.equal(vm.runInContext('candidate.ellipse.y', context), 180);
-  assert.equal(element('quality-panel').hidden, true);
-  element('calibration-undo').onclick();
-  assert.equal(element('lock').disabled, true);
-  assert.equal(vm.runInContext('calibrationPoints.length', context), 4);
-  tap(taps[4]); element('lock').onclick();
-  assert.equal(vm.runInContext('mode', context), 'watching');
-  assert.ok(vm.runInContext('!!locked.homography', context));
-});
-test('Invalid manual calibration cannot enable watching', () => {
-  const { element, context } = app();
-  const overlay = element('overlay'); overlay.width = 480; overlay.height = 360;
-  overlay.getBoundingClientRect = () => ({ left: 0, top: 0, width: 480, height: 360 });
-  element('video').videoWidth = 1280;
-  element('calibrate').onclick();
-  for (let i = 0; i < 5; i++) overlay.onclick({ clientX: 200, clientY: 180 });
-  assert.equal(element('lock').disabled, true);
-  assert.equal(vm.runInContext('calibrationPoints.length', context), 4);
-  assert.match(element('status').textContent, /újra/);
 });
 test('A freshly found outline can be locked without waiting for three matches', () => {
   const { element, context } = app(74, 1);
@@ -116,4 +84,18 @@ test('Start-watching control and hint appear above the camera exactly once', () 
     assert.equal(html.split(`id="${id}"`).length - 1, 1);
     assert.ok(html.indexOf(`id="${id}"`) < html.indexOf('id="camera"'));
   }
+});
+test('A locked automatic bull projection is not overwritten by rescanning', () => {
+  const { element, context } = app();
+  vm.runInContext('candidate.automatic = true; candidate.ellipse.homography = [80,0,100,0,60,100,0,0];', context);
+  element('lock').onclick();
+  element('video').readyState = 2;
+  context.detectBullBoard = () => { throw new Error('Locked geometry must not be rescanned'); };
+  let frames = 0;
+  context.watch = () => { frames++; };
+  context.capture = () => ({ width: 480, height: 360 });
+  vm.runInContext('cv = {}; lastScan = 0; tick();', context);
+  assert.equal(frames, 1);
+  assert.equal(vm.runInContext('mode', context), 'watching');
+  assert.equal(vm.runInContext('locked.x', context), 100);
 });

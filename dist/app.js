@@ -1,12 +1,11 @@
-import { detectBoard, sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, buildCalibration, ellipsePoint } from './board-vision.mjs?v=0.4';
+import { detectBullBoard } from './bull-vision.mjs?v=0.5';
+import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint } from './board-vision.mjs?v=0.5';
 
 const $ = id => document.getElementById(id);
 const video = $('video'), overlay = $('overlay'), ctx = overlay.getContext('2d');
 const frame = document.createElement('canvas'), fc = frame.getContext('2d', { willReadFrequently: true });
 const metrics = ['size', 'angle', 'sharpness', 'lighting', 'framing'];
 let stream = null, cv, cvLoading, mode = 'off', candidate = null, locked = null;
-let calibrationPoints = [];
-const calibrationSteps = ['1/5 · Koppints a piros bull közepére.', '2/5 · A 20-as mező középvonalában koppints a dupla gyűrű külső szélére.', '3/5 · A 6-os mező középvonalában koppints a dupla gyűrű külső szélére.', '4/5 · A 3-as mező középvonalában koppints a dupla gyűrű külső szélére.', '5/5 · A 11-es mező középvonalában koppints a dupla gyűrű külső szélére.'];
 let previousCandidate = null, stableBoards = 0, lostBoards = 0, baseline, previous, stableFrames = 0;
 let count = 0, lastEvent = 0, timer, wake, lastScan = 0, recentHit = 0, generation = 0, boardSampler, motionReference;
 
@@ -51,13 +50,12 @@ function renderControls() {
   $('lock').hidden = !stream || mode === 'watching' || mode === 'clearing';
   $('lock').disabled = !canStartWatching();
   $('lock-hint').hidden = $('lock').hidden;
-  $('quality-panel').hidden = !cv || mode === 'calibrating' || !!candidate?.manual || !!locked?.homography;
-  $('calibration-undo').hidden = !stream || !calibrationPoints.length || mode === 'watching' || mode === 'clearing';
-  $('lock-hint').textContent = mode === 'calibrating' ? calibrationSteps[calibrationPoints.length] : candidate?.manual ? 'A célkereszt a megadott bullon van. Ellenőrizd a keretet, majd indítsd a figyelést.' : !candidate ? 'Keresem a táblát. A figyelés a körvonal megjelenése után indítható.' :
+  $('quality-panel').hidden = !cv;
+  $('lock-hint').textContent = !candidate ? 'Keresem a piros bullt és a pontozó gyűrűket. A teljes tábla látszódjon.' :
     candidate.quality.score < recommendedStartQuality ? `Indítható · Kameraállás: ${candidate.quality.score}%. Gyenge képminőség: a jelzés bizonytalanabb lehet.` :
-    `Indítható · Kameraállás: ${candidate.quality.score}%. Rögzítsd a telefont, és indítsd a figyelést.`;
+    `Indítható · Bull és gyűrűk megtalálva · ${candidate.quality.score}%. Ellenőrizd a célkeresztet, majd indítsd a figyelést.`;
   $('calibrate').hidden = !stream;
-  $('calibrate').textContent = 'Tábla újrakalibrálása';
+  $('calibrate').textContent = 'Tábla újrakeresése';
   $('reset').disabled = !stream || !locked || mode === 'positioning';
   $('reset').innerHTML = mode === 'clearing' ? 'Tábla üres, folytatás' : 'Nyilak kiszedése<br><small>Szünet / új kör</small>';
 }
@@ -72,14 +70,6 @@ function showQuality(result) {
 function draw() {
   ctx.clearRect(0, 0, overlay.width, overlay.height);
   const e = locked || candidate?.ellipse;
-  if (mode === 'calibrating') {
-    ctx.save(); ctx.strokeStyle = '#ccf279'; ctx.lineWidth = 2;
-    calibrationPoints.forEach((p, i) => {
-      ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.stroke();
-      ctx.fillStyle = '#ccf279'; ctx.font = 'bold 14px sans-serif'; ctx.fillText(i === 0 ? 'BULL' : ['20', '6', '3', '11'][i - 1], p.x + 8, p.y - 8);
-    });
-    ctx.restore();
-  }
   if (!e) return;
   ctx.save(); ctx.strokeStyle = e.homography || (candidate?.quality.score ?? 0) >= 75 ? '#ccf279' : '#ffcc78'; ctx.lineWidth = 2.5;
   ctx.setLineDash(locked ? [] : [7, 5]);
@@ -96,9 +86,9 @@ function draw() {
   ctx.restore();
 }
 function position() {
-  mode = 'calibrating'; calibrationPoints = []; locked = null; boardSampler = null; previousCandidate = null; candidate = null; stableBoards = 0; lostBoards = 0;
+  mode = 'positioning'; locked = null; boardSampler = null; previousCandidate = null; candidate = null; stableBoards = 0; lostBoards = 0;
   count = 0; $('count').textContent = '0'; resetComparison(); showQuality(null); draw(); renderControls();
-  status(calibrationSteps[0]);
+  status('Keresem a bull közepét és a dupla–tripla gyűrűket…');
 }
 function capture() {
   if (!video.videoWidth || !video.videoHeight) return null;
@@ -107,16 +97,16 @@ function capture() {
   if (frame.width !== w || frame.height !== h) {
     frame.width = overlay.width = w; frame.height = overlay.height = h;
     $('camera').style.aspectRatio = video.videoWidth + '/' + video.videoHeight;
-    if (locked || calibrationPoints.length || candidate?.manual) { position(); status('A képarány megváltozott. Jelöld ki újra az öt pontot.', 'warn'); }
+    if (locked || candidate) { position(); status('A képarány megváltozott. Újrakeresem a táblát.', 'warn'); }
   }
   fc.drawImage(video, 0, 0, w, h); return fc.getImageData(0, 0, w, h);
 }
 function scanBoard(image) {
-  const result = detectBoard(cv, image);
+  const result = detectBullBoard(cv, image);
   if (mode === 'positioning') {
     stableBoards = result && sameBoard(result.ellipse, previousCandidate, 0.06) ? stableBoards + 1 : result ? 1 : 0;
     previousCandidate = result?.ellipse || null; candidate = result; showQuality(result); draw(); renderControls();
-    status(!result ? 'Nem látom biztosan a dartstáblát. Igazíts a kamerán.' : 'A körvonal megvan. Rögzítsd a telefont, majd indítsd a figyelést.', result?.quality.score >= recommendedStartQuality ? 'good' : 'warn');
+    status(!result ? 'Nem látom biztosan a bullt és a gyűrűket. Mutasd a teljes táblát élesen.' : 'A bull és a pontozó gyűrűk megvannak. Indíthatod a figyelést.', result?.quality.score >= recommendedStartQuality ? 'good' : 'warn');
   } else if (mode === 'watching') {
     if (result && sameBoard(locked, result.ellipse, 0.1)) { lostBoards = 0; candidate = result; showQuality(result); draw(); }
     else lostBoards++;
@@ -136,7 +126,7 @@ function watch(image) {
   const shift = estimateCameraShift(image, motionReference);
   if (shift.error > 10) {
     previous = null; stableFrames = 0;
-    status('A kamera elmozdult vagy a tábla takarásban van. Ha nem áll helyre, koppints a Tábla újrakalibrálása gombra.');
+    status('A kamera elmozdult vagy a tábla takarásban van. Ha nem áll helyre, koppints a Tábla újrakeresése gombra.');
     return;
   }
   const values = pixels(image, shift); if (!values.length) return;
@@ -157,14 +147,14 @@ function tick() {
   try {
     const image = capture(); if (!image) return;
     const now = Date.now();
-    if (cv && !locked?.homography && !candidate?.manual && mode !== 'calibrating' && now - lastScan > (mode === 'positioning' ? 550 : 1400)) { lastScan = now; scanBoard(image); }
+    if (cv && !locked?.homography && now - lastScan > (mode === 'positioning' ? 550 : 1400)) { lastScan = now; scanBoard(image); }
     if (mode === 'watching' && locked) watch(image);
   } catch (error) { console.error(error); position(); status('A képfeldolgozás megszakadt. Indítsd újra a kamerát.', 'warn'); }
 }
 function stop() {
   generation++; clearInterval(timer);
   const old = stream; stream = null; old?.getTracks().forEach(track => track.stop());
-  video.srcObject = null; mode = 'off'; calibrationPoints = []; boardSampler = null; locked = candidate = previousCandidate = null;
+  video.srcObject = null; mode = 'off'; boardSampler = null; locked = candidate = previousCandidate = null;
   resetComparison(); stableBoards = 0; count = 0; $('count').textContent = '0';
   wake?.release().catch(() => {}); wake = null; $('placeholder').hidden = false; $('live').textContent = 'KAMERA KIKAPCSOLVA';
   showQuality(null); draw(); renderControls(); status('Kamera leállítva.');
@@ -176,7 +166,8 @@ $('start').onclick = async () => {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('A kamera HTTPS-címen, Safariban használható.');
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false });
     video.srcObject = stream; await video.play(); $('placeholder').hidden = true; $('live').textContent = '● ÉLŐ KAMERAKÉP';
-    // Manual calibration works immediately and does not depend on OpenCV loading.
+    mode = 'loading'; renderControls();
+    status('Az automatikus táblafelismerő betöltése…'); await loadVision();
     if (request !== generation || !stream) return;
     position(); capture(); timer = setInterval(tick, 140); keepAwake();
     stream.getVideoTracks()[0].addEventListener('ended', () => { if (stream) stop(); });
@@ -188,30 +179,6 @@ $('lock').onclick = () => {
   if (!canStartWatching()) return;
   locked = { ...candidate.ellipse }; boardSampler = null; mode = 'watching'; lostBoards = 0; resetComparison(); draw(); renderControls();
   status('Lépj ki a képből. Az üres tábla alaphelyzetét rögzítem…'); speak('Figyelés indítása');
-};
-overlay.onclick = event => {
-  if (!stream || mode !== 'calibrating' || !video.videoWidth) return;
-  const rect = overlay.getBoundingClientRect();
-  const point = { x: (event.clientX - rect.left) * overlay.width / rect.width, y: (event.clientY - rect.top) * overlay.height / rect.height };
-  if (point.x < 0 || point.x >= overlay.width || point.y < 0 || point.y >= overlay.height) return;
-  calibrationPoints.push(point);
-  if (calibrationPoints.length === 5) {
-    try {
-      const ellipse = buildCalibration(calibrationPoints, overlay.width, overlay.height);
-      candidate = { ellipse, manual: true, quality: { score: 0 } };
-      mode = 'positioning';
-      status('Öt pont rögzítve. A célkereszt a bullon van. Indíthatod a figyelést.', 'good');
-    } catch (error) {
-      calibrationPoints.pop();
-      status(error.message + ' Az utolsó pontot jelöld újra, vagy használd a Visszavonás gombot.', 'warn');
-    }
-  } else status(calibrationSteps[calibrationPoints.length]);
-  draw(); renderControls();
-};
-$('calibration-undo').onclick = () => {
-  if (!stream || !calibrationPoints.length || mode === 'watching' || mode === 'clearing') return;
-  calibrationPoints.pop(); candidate = null; mode = 'calibrating';
-  status(calibrationSteps[calibrationPoints.length]); draw(); renderControls();
 };
 $('calibrate').onclick = position;
 $('reset').onclick = () => {

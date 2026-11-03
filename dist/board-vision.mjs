@@ -143,7 +143,7 @@ export function estimateCameraShift(image, reference, limit = 4) {
   return zero - best.error < 0.25 ? { x: 0, y: 0, error: zero } : best;
 }
 function sample(gray, w, h, x, y) { return gray[clamp(Math.round(y), 0, h - 1) * w + clamp(Math.round(x), 0, w - 1)]; }
-function spokePattern(gray, w, h, e) {
+export function spokePattern(gray, w, h, e) {
   const scores = [], outerScores = [];
   for (const r of [0.38, 0.5, 0.62, 0.65, 0.7, 0.86]) {
     const values = [];

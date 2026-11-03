@@ -7,21 +7,21 @@ iPhone-on, Safariban használható, kamerás dartnyíl-érzékelő prototípus.
 ## Mit tud most?
 
 - Hátsó kamera indítása és leállítása.
-- Öt érintéses kézi kalibrálás: bull, majd a külső dupla gyűrű 20-as, 6-os, 3-as és 11-es mezőjének közepe.
-- A bull helye rögzített; a négy perempont perspektivikus korrekciót határoz meg.
-- Utolsó pont visszavonása és újrakalibrálás. Hibás sorrend, túl kicsi kijelölés és rosszul illeszkedő pontok ellenőrzése.
-- A figyelés csak az öt érvényes pont után indítható. Nincs százalékos indítási korlát.
-- Tartós képi változás észlelése a kalibrált pontozóterületen belül; az automatikus felismerő nem írja felül a keretet.
+- Automatikus bullfelismerés: piros középpont, zöld bullgyűrű, dupla- és triplagyűrű, valamint szektormintázat együttes ellenőrzése.
+- A keret a külső dupla gyűrűt követi, a célkereszt a felismert bullhoz igazodik, nem az ellipszis geometriai közepéhez.
+- A bull és a külső dupla gyűrű méretarányának ellenőrzése; a külső szivacs és a piros feliratok önmagukban nem elegendők.
+- Bullhoz rögzített perspektivikus mintavétel. Indítás után a felismerő nem írja felül a beállítást.
+- Figyelés kézi pontjelölés és százalékos indítási korlát nélkül; újrakeresés a telefon áthelyezésekor.
 - Magyar hangos jelzés és nyílszámláló.
 - Állítható érzékenység és szüneteltetés a nyilak kiszedéséhez.
 
-0.4 változat: a kézi kalibrálás az alapértelmezett. A kameraképen sorban megjelenő
-utasítások szerint koppints a bull közepére, majd a **dupla gyűrű külső szélére**,
-a 20, 6, 3, 11 mezők középvonalában. Ne a számokra, a fekete számozóperemre
-vagy a szivacs szélére koppints. A célkereszt a megadott bullon marad.
-A telefon helyzetének vagy képarányának megváltoztatása után új kalibrálás kell.
-A kézi folyamat nem igényli az OpenCV betöltését; az automatikus felismerő kódja
-és tesztjei fejlesztési célra megmaradtak.
+0.5 változat: nincs szükség a tábla kézi bejelölésére. A kamera bekapcsolása után
+várd meg a bull és a pontozó gyűrűk felismerését. Ellenőrizd a célkeresztet és a
+külső dupla gyűrűt követő keretet, majd indítsd a figyelést. A kameraállás százaléka
+képi jellemzőkből számított beállítási becslés, nem felismerési pontosság.
+Ha a bull vagy a gyűrűk nem láthatók biztosan, a program nem találgat az ellipszis
+közepéből. A telefon áthelyezése után a **Tábla újrakeresése** gombbal kezdj újra.
+A képfeldolgozás és az OpenCV is a telefon böngészőjében fut.
 
 Ez még képi változásérzékelés, nem tanított nyílfelismerő modell. Hagyományos, húsz szektoros táblához készült. Árnyék, takarás és a telefon mozgása téves jelzést okozhat. Szintetikus képi ellenőrzések és két fényképes böngészőpróba történt; az iPhone-on végzett valós próbákkal még finomítani kell. Pontérték-felismerés és Android-kapcsolat még nincs.
 
@@ -34,8 +34,7 @@ git clone https://github.com/huszarjanos78-cmd/dartsfigyelo.git
 cd dartsfigyelo
 ```
 
-Nyisd meg a kicsomagolt vagy klónozott projektmappát a választott kódszerkesztőben. A Codexben is ezt a mappát válaszd projektként. A forrásfájlok a `dist` mappában találhatók. A kézi alkalmazáshoz nincs szükség csomagtelepítésre vagy fordításra. Az automatikus
-felismerő tesztjeihez Node.js 20 vagy újabb és az OpenCV egyszeri előkészítése szükséges:
+Nyisd meg a kicsomagolt vagy klónozott projektmappát a választott kódszerkesztőben. A Codexben is ezt a mappát válaszd projektként. A forrásfájlok a `dist` mappában találhatók. Node.js 20 vagy újabb és az OpenCV egyszeri előkészítése szükséges:
 
 ```sh
 node scripts/prepare-opencv.mjs
@@ -49,7 +48,8 @@ Ez letölti az OpenCV.js 4.13.0 hivatalos, ellenőrzőösszeggel rögzített fá
 - `dist/style.css` – megjelenés és mobilos elrendezés.
 - `dist/app.js` – kamera, állapotkezelés, változásérzékelés és bemondás.
 - `dist/board-vision.mjs` – mintavétel, mozgáskompenzáció és az automatikus felismerő.
-- `dist/calibration.mjs` – öt pontos perspektívakalibrálás és pontellenőrzés.
+- `dist/bull-vision.mjs` – automatikus bull- és gyűrűfelismerés, bullhoz igazított projektív leképezés.
+- `dist/calibration.mjs` – a korábbi kézi kalibrálás matematikai segédfüggvényei.
 - `scripts/prepare-opencv.mjs` – az OpenCV-függőség ellenőrzött letöltése.
 - `tests/vision.test.mjs` – szintetikus képi ellenőrzések.
 - `.openai/hosting.json` – az eredeti Sites-projekt közzétételi beállítása.
@@ -60,7 +60,7 @@ Ez letölti az OpenCV.js 4.13.0 hivatalos, ellenőrzőösszeggel rögzített fá
 
 A kamera kb. 1 méterre, kb. 45 fokban oldalról is elhelyezhető. A teljes tábla
 férjen a képbe, és a keskenyebb irányban is legyen elég nagy és éles. A távolságot
-a program nem méri. Az öt kijelölt pont határozza meg a vetületet.
+a program nem méri. A felismert dupla gyűrű és a bull helye határozza meg a vetületet.
 A figyelés a rögzített perspektivikus leképezés alapján kör alakú, állandó méretű mintavételi
 területen hasonlítja össze a képkockákat, bilineáris interpolációval.
 Az apró kameraremegést képkocka-illesztés kompenzálja (a feldolgozott képen legfeljebb 4 pixel eltolásig),
@@ -96,6 +96,7 @@ Ellenőrzések futtatása:
 
 ```sh
 node tests/vision.test.mjs
+node tests/bull-vision.test.mjs
 node tests/controls.test.mjs
 node tests/calibration.test.mjs
 ```
@@ -105,3 +106,8 @@ A GitHubra feltöltött módosítások önmagukban nem frissítik a Sites-on fut
 Következő lépés: valódi dobások tesztelése, az érzékelés finomítása, majd pontérték-felismerés és a pontok továbbítása a meglévő Android-programnak.
 
 A kamera képének feldolgozása a böngészőben történik; ez a verzió nem tölti fel a képet szerverre.
+
+A 0.5-ös változat automatikus folyamatát mobilméretű Chromiumban, a felhasználó
+által küldött ferde fényképből szimulált kamerával is ellenőriztük (felismerés,
+indítás, alaphelyzet és állóképen nulla téves találat). A fénykép nincs a nyilvános
+tárolóban. Ez nem helyettesíti a valódi iPhone-kamerával és dobásokkal végzett próbát.

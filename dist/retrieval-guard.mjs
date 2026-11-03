@@ -1,4 +1,4 @@
-import { frameDifference } from './board-vision.mjs?v=0.6';
+import { frameDifference } from './board-vision.mjs?v=0.7';
 
 // Reject broad occlusions, rather than trying to identify a person from one camera.
 export function inspectBoardChange(current, baseline) {

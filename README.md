@@ -15,7 +15,7 @@ iPhone-on, Safariban használható, kamerás dartnyíl-érzékelő prototípus.
 - Magyar hangos jelzés és nyílszámláló.
 - Állítható érzékenység és szüneteltetés a nyilak kiszedéséhez.
 
-0.6 változat: nincs szükség a tábla kézi bejelölésére. A kamera bekapcsolása után
+0.7 változat: nincs szükség a tábla kézi bejelölésére. A kamera bekapcsolása után
 várd meg a bull és a pontozó gyűrűk felismerését. Ellenőrizd a célkeresztet és a
 külső dupla gyűrűt követő keretet, majd indítsd a figyelést. A kameraállás százaléka
 képi jellemzőkből számított beállítási becslés, nem felismerési pontosság.
@@ -112,17 +112,21 @@ A 0.5-ös változat automatikus folyamatát mobilméretű Chromiumban, a felhasz
 indítás, alaphelyzet és állóképen nulla téves találat). A fénykép nincs a nyilvános
 tárolóban. Ez nem helyettesíti a valódi iPhone-kamerával és dobásokkal végzett próbát.
 
-## Nagyítás és nyílkiszedés (0.6)
+## Nagyítás és automatikus új kör (0.7)
 
 A kamera fölötti **Nagyítás** csúszka 1–3× digitális nagyítást ad. A kijelző és
 a felismerő ugyanazt a képkivágást használja; ismert tábla esetén a nagyítás a
 bull köré igazodik. Nagyításváltás után újra kell indítani a figyelést; az addigi
 számláló megmarad. A teljes dupla gyűrű maradjon a képen.
 
-Odalépés előtt a **Nyilak kiszedése** gombbal szüneteltesd a figyelést. A rendszer
-több képkockán fennmaradó nagy vagy széles, összefüggő képi takarásnál automatikusan
-is szünetel, és az üres alaphelyzethez közeledő képet nyílkiszedésként kezeli.
-Ez képi változásszűrés, nem tanított emberfelismerés; kis, nyílszerű takarás továbbra
-is megtévesztheti, ezért a kézi szünet a biztos módszer. Kiszedés után lépj ki a
-képből, majd nyomd meg a **Tábla üres, folytatás** gombot. Új alapképet csak
-látható bull és gyűrűk mellett rögzít.
+Nyílkiszedéskor a nagyobb takarás vagy a nyilak eltávolítása automatikus
+számolási szünetet indít. Az induláskor rögzített üres táblaképet megőrzi.
+Amikor minden nyíl kint van, a takarás megszűnt, és az üres tábla kb. 1,4 másodpercig
+stabilan visszatért, ellenőrzi a bullt és a pontozó gyűrűt, nullázza a számlálót,
+és gombnyomás nélkül folytatja a következő kört. Részleges kiszedés vagy takarás
+nem elegendő a nullázáshoz. Az első alapképet üres táblával kell felvenni.
+
+A **Nyilak kiszedése** gomb tartalék kézi szünetként megmarad. A szünetben
+megnyomva kézi folytatást ad, ha az automatikus visszaállás nem sikerül. A kép
+összehasonlítása nem tanított ember- vagy nyílfelismerés: kis nyílszerű takarás,
+árnyék, kameramozgás és egymást fedő nyilak továbbra is okozhatnak hibát.

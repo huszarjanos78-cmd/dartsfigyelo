@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import vm from 'node:vm';
 import { inspectBoardChange, looksLikeRemoval } from '../dist/retrieval-guard.mjs';
 import { zoomCrop } from '../dist/camera-view.mjs';
-import { frameDifference, buildCalibration, ellipsePoint } from '../dist/board-vision.mjs';
+import { frameDifference, buildCalibration, ellipsePoint, sameBoard } from '../dist/board-vision.mjs';
 
 // Exercise the actual UI handlers without requiring a physical camera.
 const source = readFileSync(new URL('../dist/app.js', import.meta.url), 'utf8').replace(/^import .*;\n/gm, '');
@@ -15,7 +15,7 @@ function app(score = 55, stable = 3) {
     if (!elements.has(id)) elements.set(id, { style: {}, checked: false, dataset: {}, getContext: () => drawing });
     return elements.get(id);
   };
-  const context = vm.createContext({ inspectBoardChange, looksLikeRemoval, zoomCrop, frameDifference, buildCalibration, ellipsePoint, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
+  const context = vm.createContext({ inspectBoardChange, looksLikeRemoval, zoomCrop, frameDifference, buildCalibration, ellipsePoint, sameBoard, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
   vm.runInContext(source, context);
   vm.runInContext(`stream = {}; mode = 'positioning'; stableBoards = ${stable}; candidate = { ellipse: { x: 100, y: 100, a: 80, b: 60, angle: 0 }, quality: { score: ${score} } }; renderControls();`, context);
   return { element, context };
@@ -153,4 +153,59 @@ test('Changing zoom pauses and redetects while preserving the count', () => {
   assert.equal(vm.runInContext('count', context), 2);
   assert.equal(element('zoom-value').textContent, '2.0×');
   assert.equal(element('lock').disabled, true);
+});
+
+function simulatedRound() {
+  const state = app(), { element, context } = state;
+  context.createBoardSampler = () => ({});
+  context.prepareMotionFrame = image => image;
+  context.createMotionReference = () => ({});
+  context.estimateCameraShift = () => ({ x: 0, y: 0, error: 0 });
+  context.sampleBoard = image => image.values;
+  element('sensitivity').value = '3'; element('lock').onclick();
+  vm.runInContext(`
+    const empty = { values: new Float32Array(1000).fill(100) };
+    const first = { values: new Float32Array(1000).fill(100) }; first.values.fill(160, 0, 10);
+    const second = { values: new Float32Array(1000).fill(100) }; second.values.fill(160, 0, 20);
+    const person = { values: new Float32Array(1000).fill(100) }; person.values.fill(160, 0, 100);
+    for (let i = 0; i < 12; i++) watch(empty);
+    for (let i = 0; i < 12; i++) watch(first);
+  `, context);
+  return state;
+}
+test('Complete retrieval resets and resumes without a button, then counts the next round', () => {
+  const { element, context } = simulatedRound();
+  vm.runInContext('for (let i = 0; i < 12; i++) watch(empty);', context);
+  assert.equal(vm.runInContext('mode', context), 'clearing');
+  vm.runInContext('for (let i = 0; i < 9; i++) recoverRound(empty);', context);
+  assert.equal(vm.runInContext('count', context), 1, 'Do not clear on a fleeting empty-looking frame');
+  vm.runInContext('recoverRound(empty);', context);
+  assert.equal(vm.runInContext('mode', context), 'watching');
+  assert.equal(element('count').textContent, '0');
+  assert.match(element('status').textContent, /Új kör/);
+  vm.runInContext('for (let i = 0; i < 12; i++) watch(first);', context);
+  assert.equal(vm.runInContext('count', context), 1);
+});
+test('Occlusion and partial retrieval cannot reset the round', () => {
+  const { context } = simulatedRound();
+  vm.runInContext(`lastEvent = 0; for (let i = 0; i < 12; i++) watch(second);
+    for (let i = 0; i < 3; i++) watch(person);
+    for (let i = 0; i < 15; i++) recoverRound(person);
+    for (let i = 0; i < 15; i++) recoverRound(first);`, context);
+  assert.equal(vm.runInContext('count', context), 2);
+  assert.equal(vm.runInContext('mode', context), 'clearing');
+  vm.runInContext('for (let i = 0; i < 10; i++) recoverRound(empty);', context);
+  assert.equal(vm.runInContext('count', context), 0);
+  assert.equal(vm.runInContext('mode', context), 'watching');
+});
+test('Automatic resume requires the bull and scoring ring to be visible', () => {
+  const { context } = simulatedRound();
+  vm.runInContext('for (let i = 0; i < 3; i++) watch(person); cv = {};', context);
+  context.detectBullBoard = () => null;
+  vm.runInContext('for (let i = 0; i < 12; i++) recoverRound(empty);', context);
+  assert.equal(vm.runInContext('mode', context), 'clearing');
+  assert.equal(vm.runInContext('count', context), 1);
+  context.detectBullBoard = () => ({ ellipse: { x: 100, y: 100, a: 80, b: 60, angle: 0 } });
+  vm.runInContext('for (let i = 0; i < 10; i++) recoverRound(empty);', context);
+  assert.equal(vm.runInContext('mode', context), 'watching');
 });

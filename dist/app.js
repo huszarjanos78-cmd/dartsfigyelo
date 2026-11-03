@@ -1,13 +1,13 @@
-import { zoomCrop } from './camera-view.mjs?v=0.6';
-import { inspectBoardChange, looksLikeRemoval } from './retrieval-guard.mjs?v=0.6';
-import { detectBullBoard } from './bull-vision.mjs?v=0.6';
-import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint } from './board-vision.mjs?v=0.6';
+import { zoomCrop } from './camera-view.mjs?v=0.7';
+import { inspectBoardChange, looksLikeRemoval } from './retrieval-guard.mjs?v=0.7';
+import { detectBullBoard } from './bull-vision.mjs?v=0.7';
+import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint } from './board-vision.mjs?v=0.7';
 
 const $ = id => document.getElementById(id);
 const video = $('video'), overlay = $('overlay'), ctx = overlay.getContext('2d');
 const frame = document.createElement('canvas'), fc = frame.getContext('2d', { willReadFrequently: true });
 const preview = $('preview'), pc = preview.getContext('2d');
-let zoom = 1, zoomFocus = { x: .5, y: .5 }, previewRequest, emptyBaseline = null, occlusionFrames = 0;
+let zoom = 1, zoomFocus = { x: .5, y: .5 }, previewRequest, emptyBaseline = null, occlusionFrames = 0, recovery = null;
 const metrics = ['size', 'angle', 'sharpness', 'lighting', 'framing'];
 let stream = null, cv, cvLoading, mode = 'off', candidate = null, locked = null;
 let previousCandidate = null, stableBoards = 0, lostBoards = 0, baseline, previous, stableFrames = 0;
@@ -44,7 +44,7 @@ function loadVision() {
 async function keepAwake() {
   try { if (!wake || wake.released) wake = await navigator.wakeLock?.request('screen'); } catch { /* Optional on iPhone. */ }
 }
-function resetComparison() { emptyBaseline = null; occlusionFrames = 0; motionReference = null; baseline = null; previous = null; stableFrames = 0; lastEvent = 0; }
+function resetComparison() { recovery = null; emptyBaseline = null; occlusionFrames = 0; motionReference = null; baseline = null; previous = null; stableFrames = 0; lastEvent = 0; }
 const recommendedStartQuality = 55;
 function canStartWatching() {
   return !!stream && mode === 'positioning' && !!candidate;
@@ -63,7 +63,7 @@ function renderControls() {
   $('calibrate').hidden = !stream;
   $('calibrate').textContent = 'Tábla újrakeresése';
   $('reset').disabled = !stream || !locked || mode === 'positioning';
-  $('reset').innerHTML = mode === 'clearing' ? 'Tábla üres, folytatás' : 'Nyilak kiszedése<br><small>Szünet / új kör</small>';
+  $('reset').innerHTML = mode === 'clearing' ? 'Automatikus új kör<br><small>Várom az üres táblát · kézi folytatás</small>' : 'Nyilak kiszedése<br><small>Szünet / új kör</small>';
 }
 function showQuality(result) {
   const score = result?.quality.score ?? 0;
@@ -120,9 +120,31 @@ function drawPreview() {
   previewRequest = requestAnimationFrame(drawPreview);
 }
 function pauseForRetrieval(text) {
-  mode = 'clearing'; resetComparison(); renderControls();
-  status(text + ' A figyelés szünetel. Ha a tábla üres és kiléptél a képből, koppints a folytatásra.', 'warn');
+  const saved = emptyBaseline && motionReference ? { empty: emptyBaseline, reference: motionReference, stable: 0 } : null;
+  mode = 'clearing'; resetComparison(); recovery = saved; renderControls();
+  status(text + ' Nem számolok. Az üres tábla visszatérésekor automatikusan új kört kezdek.', 'warn');
 }
+function recoverRound(original) {
+  if (!recovery || !locked || mode !== 'clearing') return;
+  const image = prepareMotionFrame(original), shift = estimateCameraShift(image, recovery.reference);
+  if (shift.error > 10) { recovery.stable = 0; return; }
+  const values = pixels(image, shift), delta = difference(values, recovery.empty);
+  if (delta.ratio > .001 || delta.mean > 1.5) {
+    recovery.stable = 0;
+    status('Nyílkiszedés folyamatban. Várom, hogy a tábla újra üres és takarásmentes legyen.', 'warn');
+    return;
+  }
+  if (++recovery.stable < 10) return;
+  if (cv) {
+    const visible = detectBullBoard(cv, original);
+    if (!visible || !sameBoard(locked, visible.ellipse, .15)) { recovery.stable = 0; return; }
+  }
+  const empty = recovery.empty, reference = recovery.reference;
+  resetComparison(); motionReference = reference; emptyBaseline = empty; baseline = previous = values;
+  mode = 'watching'; count = 0; $('count').textContent = '0'; renderControls();
+  status('Nyilak kiszedve. Új kör — figyelek!', 'good'); speak('Új kör');
+}
+
 function scanBoard(image) {
   const result = detectBullBoard(cv, image);
   if (mode === 'positioning') {
@@ -189,9 +211,10 @@ function watch(image) {
   } else if (Date.now() - recentHit > 2500) status('Figyelek. Jöhet a dobás!', 'good');
 }
 function tick() {
-  if (!stream || video.readyState < 2 || document.hidden || mode === 'clearing') return;
+  if (!stream || video.readyState < 2 || document.hidden) return;
   try {
     const image = capture(); if (!image) return;
+    if (mode === 'clearing') { recoverRound(image); return; }
     const now = Date.now();
     if (cv && !locked?.homography && now - lastScan > (mode === 'positioning' ? 550 : 1400)) { lastScan = now; scanBoard(image); }
     if (mode === 'watching' && locked) watch(image);
@@ -229,7 +252,7 @@ $('lock').onclick = () => {
 $('calibrate').onclick = position;
 $('reset').onclick = () => {
   if (!stream || !locked) return;
-  if (mode !== 'clearing') { mode = 'clearing'; resetComparison(); status('Figyelés szünetel. Szedd ki a nyilakat, majd koppints a folytatásra.'); }
+  if (mode !== 'clearing') { pauseForRetrieval('Kézi szünet.'); }
   else { count = 0; $('count').textContent = '0'; mode = 'watching'; lostBoards = 0; lastScan = 0; resetComparison(); status('Lépj ki a képből. Új alaphelyzet rögzítése…'); }
   renderControls();
 };
@@ -247,7 +270,7 @@ $('zoom').oninput = () => {
     status('Nagyítás módosítva. A teljes dupla gyűrű férjen a képbe; a felismerés után indítsd újra a figyelést.');
   }
 };
-$('sensitivity').oninput = () => { $('svalue').value = $('sensitivity').value; if (mode === 'watching') { resetComparison(); status('Érzékenység módosítva. Alaphelyzet rögzítése…'); } };
+$('sensitivity').oninput = () => { $('svalue').value = $('sensitivity').value; if (mode === 'watching') { previous = null; stableFrames = 0; status('Érzékenység módosítva. A figyelés folytatódik.'); } };
 $('sound').onclick = () => speak('Nyíl érzékelve');
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && stream) { keepAwake(); position(); status('Visszatértél az alkalmazáshoz. Ellenőrizd a körvonalat, majd indítsd újra a figyelést.'); }

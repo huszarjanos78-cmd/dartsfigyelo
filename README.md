@@ -59,6 +59,16 @@ Az iPhone kamerájának használatához HTTPS-cím kell. A telefonról megnyitot
 
 ## Közzététel és további cél
 
+### GitHub Pages
+
+A tároló **Settings → Pages → Source** beállítása legyen **GitHub Actions**.
+A `.github/workflows/pages.yml` folyamat minden `main` ágra feltöltött változásnál
+letölti és ellenőrzőösszeggel ellenőrzi az OpenCV-t, lefuttatja a felismerési
+teszteket, majd siker esetén közzéteszi a `dist` mappát, az OpenCV-vel együtt.
+Kézzel is indítható az **Actions → Deploy Dartfigyelő to GitHub Pages → Run workflow**
+lehetőséggel. Az elkészült HTTPS-cím a sikeres futás `deploy` feladatánál és a
+Pages beállításainál jelenik meg. Ez a közzététel a korábbi Sites-címet nem frissíti.
+
 Ellenőrzések futtatása:
 
 ```sh

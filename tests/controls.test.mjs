@@ -238,3 +238,41 @@ test('A small colour-only hit is confirmed, not double-counted, and must be remo
   assert.equal(vm.runInContext('mode', context), 'watching');
   assert.equal(vm.runInContext('count', context), 0);
 });
+
+test('Three removed darts reset the round even below the current hit threshold', () => {
+  const { element, context } = app();
+  context.createBoardSampler = () => ({});
+  context.prepareMotionFrame = image => image;
+  context.createMotionReference = () => ({});
+  context.estimateCameraShift = () => ({ x: 0, y: 0, error: 0 });
+  context.sampleBoard = image => image.values;
+  element('sensitivity').value = '5';
+  element('lock').onclick();
+  vm.runInContext(`
+    const empty = { values: new Float32Array(1000).fill(100) };
+    const hits = [2, 4, 6].map(end => {
+      const values = empty.values.slice();
+      values.fill(180, 0, end);
+      return { values };
+    });
+    for (let i = 0; i < 12; i++) watch(empty);
+    for (const hit of hits) {
+      lastEvent = 0;
+      for (let i = 0; i < 12; i++) watch(hit);
+    }
+  `, context);
+  assert.equal(element('count').textContent, 3);
+  element('sensitivity').value = '1';
+  element('sensitivity').oninput();
+  vm.runInContext('for (let i = 0; i < 12; i++) watch(empty);', context);
+  assert.equal(element('reset').dataset.state, 'paused');
+  vm.runInContext('for (let i = 0; i < 9; i++) recoverRound(empty);', context);
+  assert.equal(element('count').textContent, 3);
+  vm.runInContext('recoverRound(empty);', context);
+  assert.equal(element('reset').dataset.state, 'watching');
+  assert.equal(element('count').textContent, '0');
+  element('sensitivity').value = '5';
+  element('sensitivity').oninput();
+  vm.runInContext('for (let i = 0; i < 12; i++) watch(hits[0]);', context);
+  assert.equal(element('count').textContent, 1);
+});

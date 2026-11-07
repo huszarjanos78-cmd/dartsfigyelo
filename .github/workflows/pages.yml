@@ -38,6 +38,8 @@ jobs:
         run: node tests/camera-safety.test.mjs
       - name: Test small persistent hits
         run: node tests/small-hit.test.mjs
+      - name: Test diagonal and edge hits
+        run: node tests/edge-hits.test.mjs
       - name: Test manual perspective calibration
         run: node tests/calibration.test.mjs
       - name: Upload website

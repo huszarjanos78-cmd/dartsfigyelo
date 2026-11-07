@@ -1,8 +1,8 @@
-import { smallHitEvidence, confirmSmallHit } from './hit-evidence.mjs?v=0.8';
-import { zoomCrop } from './camera-view.mjs?v=0.8';
-import { inspectBoardChange, looksLikeRemoval } from './retrieval-guard.mjs?v=0.8';
-import { detectBullBoard } from './bull-vision.mjs?v=0.8';
-import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint } from './board-vision.mjs?v=0.8';
+import { smallHitEvidence, confirmSmallHit } from './hit-evidence.mjs?v=0.9';
+import { zoomCrop } from './camera-view.mjs?v=0.9';
+import { inspectBoardChange, looksLikeRemoval } from './retrieval-guard.mjs?v=0.9';
+import { detectBullBoard } from './bull-vision.mjs?v=0.9';
+import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint } from './board-vision.mjs?v=0.9';
 
 const $ = id => document.getElementById(id);
 const video = $('video'), overlay = $('overlay'), ctx = overlay.getContext('2d');
@@ -97,8 +97,9 @@ function position(options = {}) {
 }
 function capture() {
   if (!video.videoWidth || !video.videoHeight) return null;
-  const w = Math.round(480 * video.videoWidth / Math.max(video.videoWidth, video.videoHeight));
-  const h = Math.round(480 * video.videoHeight / Math.max(video.videoWidth, video.videoHeight));
+  const analysisSize = Math.min(720, Math.max(video.videoWidth, video.videoHeight) / zoom);
+  const w = Math.round(analysisSize * video.videoWidth / Math.max(video.videoWidth, video.videoHeight));
+  const h = Math.round(analysisSize * video.videoHeight / Math.max(video.videoWidth, video.videoHeight));
   if (frame.width !== w || frame.height !== h) {
     frame.width = overlay.width = w; frame.height = overlay.height = h;
     $('camera').style.aspectRatio = video.videoWidth + '/' + video.videoHeight;
@@ -169,7 +170,7 @@ function scanBoard(image) {
   }
 }
 function pixels(image, shift) {
-  if (!boardSampler) boardSampler = createBoardSampler(image.width, image.height, locked);
+  if (!boardSampler) boardSampler = createBoardSampler(image.width, image.height, locked, 224, 1.18);
   return sampleBoard(image, boardSampler, shift.x, shift.y);
 }
 

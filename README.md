@@ -15,7 +15,7 @@ iPhone-on, Safariban használható, kamerás dartnyíl-érzékelő prototípus.
 - Magyar hangos jelzés és nyílszámláló.
 - Állítható érzékenység és szüneteltetés a nyilak kiszedéséhez.
 
-0.8 változat: nincs szükség a tábla kézi bejelölésére. A kamera bekapcsolása után
+0.9 változat: nincs szükség a tábla kézi bejelölésére. A kamera bekapcsolása után
 várd meg a bull és a pontozó gyűrűk felismerését. Ellenőrizd a célkeresztet és a
 külső dupla gyűrűt követő keretet, majd indítsd a figyelést. A kameraállás százaléka
 képi jellemzőkből számított beállítási becslés, nem felismerési pontosság.
@@ -145,3 +145,22 @@ A tesztek vékony nyílszárat, kis színes tollat, szürkeárnyalatban azonos f
 színváltozást, egyszeri zajt, expozícióváltást és kompenzált remegést tartalmaznak.
 Ezek nem adnak százalékos pontossági becslést a valódi dobásokra; azt új
 iPhone-os tesztsorozattal kell ellenőrizni.
+
+## Ferde középső és peremközeli nyilak (0.9)
+
+A változó folt vastagságát a saját főtengelyei mentén vizsgálja, ezért egy ferdén
+látszó keskeny nyíl nem lesz pusztán a képernyőn elfoglalt szélessége miatt
+kéznek/takarásnak minősítve. A nagy vagy széles takarás továbbra is szüneteltet.
+
+A felismerési keret továbbra is a külső dupla gyűrűn marad, de a megfigyelt
+kör sugara annak 118%-áig ér: ez a dupla melletti keskeny táblaperemet is tartalmazza,
+hogy a kifelé vetülő szár/toll ne maradjon ki. A vetített, képen kívüli mintákat
+kihagyja. A normalizált rács 224×224, a feldolgozott kép hosszabb oldala legfeljebb
+720 pixel, a forrás képkivágásának felbontásánál nem nagyobb.
+
+Tizenöt célzott teszt tartalmaz ferde középső foltot, széles kéztakarást, a dupla
+belső/külső szélét és a szomszédos peremet, mindkét oldali perspektívával. A régi
+0.8.1 kódon ezek a regressziós esetek hibáztak. Ez nem pontszámfelismerés, és nem
+igazolt százalékos pontossági adat; a valódi nyilakkal végzett próbát továbbra is
+folytatni kell. A tábla által takart vagy a kameraképből kilógó nyílrészlet nem
+állítható vissza pusztán a nagyítással.

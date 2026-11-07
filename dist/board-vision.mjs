@@ -1,6 +1,6 @@
 // Scores describe image geometry and quality; they are not recognition probabilities.
-import { projectPoint } from './calibration.mjs?v=0.4';
-export { buildCalibration } from './calibration.mjs?v=0.4';
+import { projectPoint } from './calibration.mjs?v=0.9';
+export { buildCalibration } from './calibration.mjs?v=0.9';
 export const clamp = (n, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, n));
 export function ellipsePoint(e, r, t) {
   if (e.homography) return projectPoint(e.homography, r * Math.cos(t), r * Math.sin(t));
@@ -17,16 +17,17 @@ export function sameBoard(a, b, tolerance = 0.08) {
     (a.b / a.a > 0.92 && b.b / b.a > 0.92 || Math.abs(Math.sin(a.angle - b.angle)) < tolerance * 2);
 }
 
-// Rectify a locked ellipse onto a fixed circular sampling grid. Cache this map
-// until the camera is repositioned; bilinear sampling avoids nearest-pixel jumps.
-// This corrects elliptical foreshortening, not a calibrated full perspective.
-export function createBoardSampler(width, height, e, size = 192) {
+// Cache an affine or bull-anchored projective sampling grid until repositioning.
+// A radius above one includes the narrow board margin outside the double ring.
+// Bilinear sampling avoids nearest-pixel jumps; off-screen padded points are omitted.
+export function createBoardSampler(width, height, e, size = 192, radius = .98) {
   const indices = [], weights = [], gridPositions = [], c = Math.cos(e.angle), s = Math.sin(e.angle);
   for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-    const u = (2 * (x + 0.5) / size - 1) * 0.98;
-    const v = (2 * (y + 0.5) / size - 1) * 0.98;
-    if (u * u + v * v > 0.98 ** 2) continue;
+    const u = (2 * (x + 0.5) / size - 1) * radius;
+    const v = (2 * (y + 0.5) / size - 1) * radius;
+    if (u * u + v * v > radius ** 2) continue;
     const projected = e.homography ? projectPoint(e.homography, u, v) : { x: e.x + e.a * u * c - e.b * v * s, y: e.y + e.a * u * s + e.b * v * c };
+    if (radius > 1 && (projected.x < 0 || projected.y < 0 || projected.x >= width - 1 || projected.y >= height - 1)) continue;
     const px = clamp(projected.x, 0, width - 1);
     const py = clamp(projected.y, 0, height - 1);
     const ix = Math.min(Math.floor(px), width - 2), iy = Math.min(Math.floor(py), height - 2);
@@ -34,7 +35,7 @@ export function createBoardSampler(width, height, e, size = 192) {
     gridPositions.push(y * size + x);
     weights.push(px - ix, py - iy);
   }
-  return { width, height, size, gridPositions: new Int32Array(gridPositions), indices: new Int32Array(indices), weights: new Float32Array(weights) };
+  return { width, height, size, radius, gridPositions: new Int32Array(gridPositions), indices: new Int32Array(indices), weights: new Float32Array(weights) };
 }
 export function sampleBoard(image, map, dx = 0, dy = 0) {
   if (image.width !== map.width || image.height !== map.height) throw new Error('Camera dimensions changed');
@@ -43,6 +44,7 @@ export function sampleBoard(image, map, dx = 0, dy = 0) {
   values.edgeNoise = new Float32Array(values.length);
   values.gridPositions = map.gridPositions;
   values.gridSize = map.size;
+  values.gridRadius = map.radius;
   if (image.rgba) {
     values.fine = new Float32Array(values.length * 3);
     values.fineNoise = new Float32Array(values.length);

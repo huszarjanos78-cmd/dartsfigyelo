@@ -122,12 +122,21 @@ function pauseForRetrieval(text) {
   mode = 'clearing'; resetComparison(); recovery = saved; renderControls();
   status(text + ' Nem számolok. Az üres tábla visszatérésekor automatikusan új kört kezdek.', 'warn');
 }
+function matchesEmptyBoard(values, empty) {
+  if (!empty || !values.length || values.length !== empty.length) return false;
+  const delta = difference(values, empty);
+  return delta.ratio <= .001 && delta.mean <= 1.5 && !smallHitEvidence(values, empty, 5);
+}
 function recoverRound(original) {
   if (!recovery || !locked || mode !== 'clearing') return;
   const image = prepareMotionFrame(original), shift = estimateCameraShift(image, recovery.reference);
-  if (shift.error > 10) { recovery.stable = 0; return; }
-  const values = pixels(image, shift), delta = difference(values, recovery.empty);
-  if (delta.ratio > .001 || delta.mean > 1.5 || smallHitEvidence(values, recovery.empty, 5)) {
+  if (shift.error > 10) {
+    recovery.stable = 0;
+    status('Az üres táblát nem tudom a korábbi képhez igazítani. Ellenőrizd a kamerát és a takarást.', 'warn');
+    return;
+  }
+  const values = pixels(image, shift);
+  if (!matchesEmptyBoard(values, recovery.empty)) {
     recovery.stable = 0;
     status('Nyílkiszedés folyamatban. Várom, hogy a tábla újra üres és takarásmentes legyen.', 'warn');
     return;
@@ -135,7 +144,11 @@ function recoverRound(original) {
   if (++recovery.stable < 10) return;
   if (cv) {
     const visible = detectBullBoard(cv, original);
-    if (!visible || !sameBoard(locked, visible.ellipse, .15)) { recovery.stable = 0; return; }
+    if (!visible || !sameBoard(locked, visible.ellipse, .15)) {
+      recovery.stable = 0;
+      status('Az új körhöz látnom kell a bullt és a teljes pontozó gyűrűt.', 'warn');
+      return;
+    }
   }
   const empty = recovery.empty, reference = recovery.reference;
   resetComparison(); motionReference = reference; emptyBaseline = empty; baseline = previous = values;
@@ -199,6 +212,11 @@ function watch(image) {
       }
     }
     baseline = emptyBaseline = values; status('Figyelek. Jöhet a dobás!', 'good'); return;
+  }
+  // The empty board can return without crossing the current hit threshold.
+  if (count > 0 && matchesEmptyBoard(values, emptyBaseline)) {
+    pauseForRetrieval('Visszatért az üres tábla.');
+    return;
   }
   const delta = change, threshold = [0.009, 0.006, 0.0035, 0.002, 0.0012][Number($('sensitivity').value) - 1];
   smallCandidate = confirmSmallHit(smallCandidate, smallHitEvidence(values, baseline, Number($('sensitivity').value)));

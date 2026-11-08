@@ -1,7 +1,11 @@
 // Scores describe image geometry and quality; they are not recognition probabilities.
-import { projectPoint } from './calibration.mjs?v=0.9';
-export { buildCalibration } from './calibration.mjs?v=0.9';
+import { projectPoint } from './calibration.mjs?v=0.9.1';
+export { buildCalibration } from './calibration.mjs?v=0.9.1';
 export const clamp = (n, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, n));
+// Standard 450 mm physical board vs 340 mm outer double-ring diameter.
+export const BOARD_OUTER_RADIUS = 225 / 170;
+export const BOARD_SAMPLE_RADIUS = 1.34;
+export const BOARD_SAMPLE_SIZE = 256;
 export function ellipsePoint(e, r, t) {
   if (e.homography) return projectPoint(e.homography, r * Math.cos(t), r * Math.sin(t));
   const u = e.a * r * Math.cos(t), v = e.b * r * Math.sin(t), c = Math.cos(e.angle), s = Math.sin(e.angle);

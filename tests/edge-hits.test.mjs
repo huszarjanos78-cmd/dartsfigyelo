@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createBoardSampler, sampleBoard, frameDifference } from '../dist/board-vision.mjs';
+import { createBoardSampler, sampleBoard, frameDifference, BOARD_SAMPLE_SIZE, BOARD_SAMPLE_RADIUS } from '../dist/board-vision.mjs';
 import { inspectBoardChange } from '../dist/retrieval-guard.mjs';
 import { smallHitEvidence } from '../dist/hit-evidence.mjs';
 
@@ -36,16 +36,27 @@ test('Small diagonal colour evidence is accepted, but a broad hand still pauses'
   assert.equal(inspectBoardChange(rotatedPatch(24, 24, Math.PI / 4), empty).obstructed, true);
 });
 
-function projectedScene(g, side, contact, dart = false) {
+function projectedScene(g, side, contact, dart = false, rim = false) {
   const width = 720, height = 540, data = new Uint8ClampedArray(width * height * 4);
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
     const u = (x - 360) / (160 - g * x), v = (y * (1 + g * u) - 270) / 110, along = side * u;
     let rgb = [100, 100, 100];
-    if (dart && along > contact && along < contact + .14 && Math.abs(v) < .009) rgb = [20, 20, 20];
-    if (dart && along > contact + .09 && along < contact + .16 && Math.abs(v) < .035) rgb = [40, 120, 180];
+    if (dart && !rim && along > contact && along < contact + .14 && Math.abs(v) < .009) rgb = [20, 20, 20];
+    if (dart && !rim && along > contact + .09 && along < contact + .16 && Math.abs(v) < .035) rgb = [40, 120, 180];
+    if (dart && rim && Math.abs(along - contact) < .035 && Math.abs(v) < .04) rgb = [40, 120, 180];
     const i = (y * width + x) * 4; data.set(rgb, i); data[i + 3] = 255;
   }
   return { width, height, data };
+}
+for (const g of [-.15, .15]) for (const side of [-1, 1]) for (const contact of [1.24, 1.28]) {
+  test(`Physical board rim, perspective ${g}, side ${side}, radius ${contact}`, () => {
+    const geometry = { x: 360, y: 270, a: 160, b: 110, angle: 0, homography: [160, 0, 360, 0, 110, 270, g, 0] };
+    const emptyImage = projectedScene(g, side, contact), hitImage = projectedScene(g, side, contact, true, true);
+    const full = createBoardSampler(720, 540, geometry, BOARD_SAMPLE_SIZE, BOARD_SAMPLE_RADIUS);
+    const old = createBoardSampler(720, 540, geometry, 224, 1.18);
+    assert.ok(smallHitEvidence(sampleBoard(hitImage, full), sampleBoard(emptyImage, full), 3), 'The numbered rim must be watched');
+    assert.equal(frameDifference(sampleBoard(hitImage, old), sampleBoard(emptyImage, old)).ratio, 0, 'The previous narrow margin could not see this hit');
+  });
 }
 for (const g of [-.15, .15]) for (const side of [-1, 1]) for (const contact of [.96, 1, 1.06]) {
   test(`Projected double/rim hit: perspective ${g}, side ${side}, radius ${contact}`, () => {

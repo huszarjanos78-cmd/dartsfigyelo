@@ -15,7 +15,7 @@ iPhone-on, Safariban használható, kamerás dartnyíl-érzékelő prototípus.
 - Magyar hangos jelzés és nyílszámláló.
 - Állítható érzékenység és szüneteltetés a nyilak kiszedéséhez.
 
-0.9 változat: nincs szükség a tábla kézi bejelölésére. A kamera bekapcsolása után
+0.9.1 változat: nincs szükség a tábla kézi bejelölésére. A kamera bekapcsolása után
 várd meg a bull és a pontozó gyűrűk felismerését. Ellenőrizd a célkeresztet és a
 külső dupla gyűrűt követő keretet, majd indítsd a figyelést. A kameraállás százaléka
 képi jellemzőkből számított beállítási becslés, nem felismerési pontosság.
@@ -164,3 +164,14 @@ belső/külső szélét és a szomszédos peremet, mindkét oldali perspektívá
 igazolt százalékos pontossági adat; a valódi nyilakkal végzett próbát továbbra is
 folytatni kell. A tábla által takart vagy a kameraképből kilógó nyílrészlet nem
 állítható vissza pusztán a nagyítással.
+
+## Teljes táblaperem figyelése (0.9.1)
+
+A fő jelölőkeret a szabványos, kb. 450 mm átmérőjű dartstábla külső körvonalát
+követi, a számozott fekete peremmel együtt. A belső kalibrálás továbbra is a bull
+és a 340 mm-es dupla gyűrű alapján történik. A megfigyelt sugár a dupla gyűrű
+sugarának 1,34-szerese, 256×256 mintavételi rácson, így a korábbi mintasűrűség
+megmarad. A dupla melletti, külső táblaperembe érkező nyilak is megfigyelhetők.
+A teljes külső perem férjen a kameraképbe; kilógáskor a felület kisebb zoomot kér,
+de nem tiltja le az indítást. A keret mérete szabványos táblaméretből számított
+becslés; egy kameraképből a takart vagy képen kívüli nyílrészletek nem állíthatók vissza.

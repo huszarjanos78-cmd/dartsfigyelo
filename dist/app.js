@@ -1,8 +1,8 @@
-import { smallHitEvidence, confirmSmallHit } from './hit-evidence.mjs?v=0.9';
-import { zoomCrop } from './camera-view.mjs?v=0.9';
-import { inspectBoardChange, looksLikeRemoval } from './retrieval-guard.mjs?v=0.9';
-import { detectBullBoard } from './bull-vision.mjs?v=0.9';
-import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint } from './board-vision.mjs?v=0.9';
+import { smallHitEvidence, confirmSmallHit } from './hit-evidence.mjs?v=0.9.1';
+import { zoomCrop } from './camera-view.mjs?v=0.9.1';
+import { inspectBoardChange, looksLikeRemoval } from './retrieval-guard.mjs?v=0.9.1';
+import { detectBullBoard } from './bull-vision.mjs?v=0.9.1';
+import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint, BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE } from './board-vision.mjs?v=0.9.1';
 
 const $ = id => document.getElementById(id);
 const video = $('video'), overlay = $('overlay'), ctx = overlay.getContext('2d');
@@ -59,6 +59,8 @@ function renderControls() {
   $('lock-hint').textContent = !candidate ? 'Keresem a piros bullt és a pontozó gyűrűket. A teljes tábla látszódjon.' :
     candidate.quality.score < recommendedStartQuality ? 'Indítható. Gyenge képminőség: a jelzés bizonytalanabb lehet.' :
     'Indítható · Bull és gyűrűk megtalálva. Ellenőrizd a célkeresztet, majd indítsd a figyelést.';
+  if (candidate && !wholeBoardVisible(candidate.ellipse))
+    $('lock-hint').textContent = 'A tábla külső pereme kilóg a képből. Csökkentsd a nagyítást, hogy minden nyíl látszódjon.';
   $('calibrate').hidden = !stream;
   $('calibrate').textContent = 'Tábla újrakeresése';
   $('reset').disabled = !stream || !locked || mode === 'positioning';
@@ -80,14 +82,22 @@ function draw() {
   ctx.beginPath();
   if (e.homography) {
     for (let i = 0; i <= 120; i++) {
-      const p = ellipsePoint(e, 1, i * Math.PI / 60);
+      const p = ellipsePoint(e, BOARD_OUTER_RADIUS, i * Math.PI / 60);
       if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
     }
-  } else ctx.ellipse(e.x, e.y, e.a, e.b, e.angle, 0, Math.PI * 2);
+  } else ctx.ellipse(e.x, e.y, e.a * BOARD_OUTER_RADIUS, e.b * BOARD_OUTER_RADIUS, e.angle, 0, Math.PI * 2);
   ctx.stroke();
   ctx.setLineDash([]); ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(e.x - 8, e.y); ctx.lineTo(e.x + 8, e.y); ctx.moveTo(e.x, e.y - 8); ctx.lineTo(e.x, e.y + 8); ctx.stroke();
   ctx.restore();
+}
+function wholeBoardVisible(e) {
+  if (!overlay.width || !overlay.height) return true;
+  for (let i = 0; i < 120; i++) {
+    const p = ellipsePoint(e, BOARD_OUTER_RADIUS, i * Math.PI / 60);
+    if (p.x < 0 || p.x >= overlay.width || p.y < 0 || p.y >= overlay.height) return false;
+  }
+  return true;
 }
 function position(options = {}) {
   mode = 'positioning'; locked = null; boardSampler = null; previousCandidate = null; candidate = null; stableBoards = 0; lostBoards = 0;
@@ -170,7 +180,7 @@ function scanBoard(image) {
   }
 }
 function pixels(image, shift) {
-  if (!boardSampler) boardSampler = createBoardSampler(image.width, image.height, locked, 224, 1.18);
+  if (!boardSampler) boardSampler = createBoardSampler(image.width, image.height, locked, BOARD_SAMPLE_SIZE, BOARD_SAMPLE_RADIUS);
   return sampleBoard(image, boardSampler, shift.x, shift.y);
 }
 
@@ -287,7 +297,7 @@ $('zoom').oninput = () => {
   $('zoom-value').textContent = zoom.toFixed(1) + '×';
   if (stream) {
     position({ preserveCount: true });
-    status('Nagyítás módosítva. A teljes dupla gyűrű férjen a képbe; a felismerés után indítsd újra a figyelést.');
+    status('Nagyítás módosítva. A teljes tábla külső pereme férjen a képbe; a felismerés után indítsd újra a figyelést.');
   }
 };
 $('sensitivity').oninput = () => { $('svalue').value = $('sensitivity').value; if (mode === 'watching') { previous = null; stableFrames = 0; status('Érzékenység módosítva. A figyelés folytatódik.'); } };

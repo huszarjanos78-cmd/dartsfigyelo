@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { smallHitEvidence, confirmSmallHit } from '../dist/hit-evidence.mjs';
 import { inspectBoardChange, looksLikeRemoval } from '../dist/retrieval-guard.mjs';
 import { zoomCrop } from '../dist/camera-view.mjs';
-import { createBoardSampler, sampleBoard } from '../dist/board-vision.mjs';
+import { createBoardSampler, sampleBoard, BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE } from '../dist/board-vision.mjs';
 import { frameDifference, buildCalibration, ellipsePoint, sameBoard } from '../dist/board-vision.mjs';
 
 // Exercise the actual UI handlers without requiring a physical camera.
@@ -17,7 +17,7 @@ function app(score = 55, stable = 3) {
     if (!elements.has(id)) elements.set(id, { style: {}, checked: false, dataset: {}, getContext: () => drawing });
     return elements.get(id);
   };
-  const context = vm.createContext({ smallHitEvidence, confirmSmallHit, inspectBoardChange, looksLikeRemoval, zoomCrop, frameDifference, buildCalibration, ellipsePoint, sameBoard, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
+  const context = vm.createContext({ BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE, smallHitEvidence, confirmSmallHit, inspectBoardChange, looksLikeRemoval, zoomCrop, frameDifference, buildCalibration, ellipsePoint, sameBoard, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
   vm.runInContext(source, context);
   vm.runInContext(`stream = {}; mode = 'positioning'; stableBoards = ${stable}; candidate = { ellipse: { x: 100, y: 100, a: 80, b: 60, angle: 0 }, quality: { score: ${score} } }; renderControls();`, context);
   return { element, context };
@@ -155,6 +155,16 @@ test('Changing zoom pauses and redetects while preserving the count', () => {
   assert.equal(vm.runInContext('count', context), 2);
   assert.equal(element('zoom-value').textContent, '2.0×');
   assert.equal(element('lock').disabled, true);
+});
+test('A cropped physical board edge displays a zoom warning without blocking start', () => {
+  const { element, context } = app(74);
+  element('overlay').width = element('overlay').height = 200;
+  vm.runInContext('renderControls();', context);
+  assert.match(element('lock-hint').textContent, /külső pereme kilóg/);
+  assert.equal(element('lock').disabled, false);
+  element('overlay').width = element('overlay').height = 300;
+  vm.runInContext('candidate.ellipse.x = candidate.ellipse.y = 150; renderControls();', context);
+  assert.match(element('lock-hint').textContent, /Indítható/);
 });
 
 function simulatedRound() {

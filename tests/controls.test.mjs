@@ -1,3 +1,4 @@
+import { estimateHit, boardCoordinates } from '../dist/scoring.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
@@ -14,10 +15,10 @@ function app(score = 55, stable = 3) {
   const elements = new Map();
   const drawing = Object.fromEntries(['clearRect', 'save', 'restore', 'setLineDash', 'beginPath', 'ellipse', 'stroke', 'moveTo', 'lineTo', 'arc', 'fillText'].map(name => [name, () => {}]));
   const element = id => {
-    if (!elements.has(id)) elements.set(id, { style: {}, checked: false, dataset: {}, getContext: () => drawing });
+    if (!elements.has(id)) elements.set(id, { append() {}, style: {}, checked: false, dataset: {}, getContext: () => drawing });
     return elements.get(id);
   };
-  const context = vm.createContext({ BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE, smallHitEvidence, confirmSmallHit, inspectBoardChange, looksLikeRemoval, zoomCrop, frameDifference, buildCalibration, ellipsePoint, sameBoard, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
+  const context = vm.createContext({ estimateHit, boardCoordinates, BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE, smallHitEvidence, confirmSmallHit, inspectBoardChange, looksLikeRemoval, zoomCrop, frameDifference, buildCalibration, ellipsePoint, sameBoard, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
   vm.runInContext(source, context);
   vm.runInContext(`stream = {}; mode = 'positioning'; stableBoards = ${stable}; candidate = { ellipse: { x: 100, y: 100, a: 80, b: 60, angle: 0 }, quality: { score: ${score} } }; renderControls();`, context);
   return { element, context };
@@ -285,4 +286,71 @@ test('Three removed darts reset the round even below the current hit threshold',
   element('sensitivity').oninput();
   vm.runInContext('for (let i = 0; i < 12; i++) watch(hits[0]);', context);
   assert.equal(element('count').textContent, 1);
+});
+
+test('Automatic recovery clears stale board-loss state and tick keeps watching an affine board', () => {
+ const {context,element}=simulatedRound();
+ vm.runInContext('lostBoards = 2; for(let i=0;i<12;i++)watch(empty); for(let i=0;i<10;i++)recoverRound(empty);',context);
+ assert.equal(vm.runInContext('lostBoards',context),0);
+ context.detectBullBoard=()=>null;
+ context.capture=()=>context.emptyFrame;
+ element('video').readyState=2;
+ vm.runInContext('cv={}; lastScan=0;',context);
+ context.capture=()=>({values:new Float32Array(1000).fill(100)});
+ vm.runInContext('for(let i=0;i<5;i++){lastScan=0;tick();}',context);
+ assert.equal(vm.runInContext('mode',context),'watching');
+ vm.runInContext('for(let i=0;i<12;i++)watch(first);',context);
+ assert.equal(vm.runInContext('count',context),1);
+});
+
+test('Correcting a score updates total and automatic new round clears it',()=>{
+ const {context,element}=simulatedRound();
+ const rows=[];
+ context.document.createElement=()=>({children:[],append(item){this.children.push(item);}});
+ element('scores').append=row=>rows.push(row);
+ vm.runInContext('roundHits = [{estimate:{score:60,sector:20,multiplier:3},corrected:null}]; renderScores();',context);
+ assert.equal(element('score-total').textContent,'60');
+ const select=rows.at(-1).children[0];
+ select.value='1'; select.onchange();
+ assert.equal(element('score-total').textContent,'0');
+ assert.equal(vm.runInContext('roundHits[0].corrected.score',context),0);
+ vm.runInContext('for(let i=0;i<12;i++)watch(empty); for(let i=0;i<10;i++)recoverRound(empty);',context);
+ assert.equal(vm.runInContext('roundHits.length',context),0);
+ assert.equal(element('score-total').textContent,'0');
+});
+
+test('Orientation uses displayed canvas coordinates and resets after zoom or redetection', () => {
+  const {context, element} = app();
+  element('score-orient').onclick();
+  assert.equal(vm.runInContext('orientingScore', context), false);
+  element('lock').onclick();
+  const overlay = element('overlay');
+  overlay.width = 200; overlay.height = 200;
+  overlay.getBoundingClientRect = () => ({left: 10, top: 20, width: 400, height: 400});
+  element('score-orient').onclick();
+  overlay.onclick({clientX: 210, clientY: 220}); // Bull is not an orientation reference.
+  assert.equal(vm.runInContext('scoreRotation', context), null);
+  overlay.onclick({clientX: 370, clientY: 220}); // Right double ring.
+  assert.equal(vm.runInContext('scoreRotation', context), Math.PI/2);
+  assert.equal(vm.runInContext('orientingScore', context), false);
+  element('zoom').value = '2'; element('zoom').oninput();
+  assert.equal(vm.runInContext('scoreRotation', context), null);
+  vm.runInContext('scoreRotation = 1; orientingScore = true;', context);
+  element('calibrate').onclick();
+  assert.equal(vm.runInContext('scoreRotation', context), null);
+  assert.equal(vm.runInContext('orientingScore', context), false);
+});
+
+test('Unknown hits remain countable and can be corrected to a score or unknown', () => {
+  const {context, element} = simulatedRound(), rows = [];
+  context.document.createElement = () => ({children: [], append(item) {this.children.push(item);}});
+  element('scores').append = row => rows.push(row);
+  vm.runInContext('renderScores();', context);
+  assert.equal(element('score-total').textContent, '0 + 1 ismeretlen');
+  let select = rows.at(-1).children[0];
+  select.value = '63'; select.onchange(); // T20.
+  assert.equal(element('score-total').textContent, '60');
+  select = rows.at(-1).children[0]; select.value = '0'; select.onchange();
+  assert.equal(element('score-total').textContent, '0 + 1 ismeretlen');
+  assert.equal(vm.runInContext('count', context), 1);
 });

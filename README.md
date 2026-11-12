@@ -23,7 +23,7 @@ Ha a bull vagy a gyűrűk nem láthatók biztosan, a program nem találgat az el
 közepéből. A telefon áthelyezése után a **Tábla újrakeresése** gombbal kezdj újra.
 A képfeldolgozás és az OpenCV is a telefon böngészőjében fut.
 
-Ez még képi változásérzékelés, nem tanított nyílfelismerő modell. Hagyományos, húsz szektoros táblához készült. Árnyék, takarás és a telefon mozgása téves jelzést okozhat. Szintetikus képi ellenőrzések és két fényképes böngészőpróba történt; az iPhone-on végzett valós próbákkal még finomítani kell. Pontérték-felismerés és Android-kapcsolat még nincs.
+Ez még képi változásérzékelés, nem tanított nyílfelismerő modell. Hagyományos, húsz szektoros táblához készült. Árnyék, takarás és a telefon mozgása téves jelzést okozhat. Szintetikus képi ellenőrzések és két fényképes böngészőpróba történt; az iPhone-on végzett valós próbákkal még finomítani kell. A pontérték kísérleti, javítható becslés; Android-kapcsolat még nincs.
 
 ## Folytatás másik számítógépen
 
@@ -175,3 +175,11 @@ megmarad. A dupla melletti, külső táblaperembe érkező nyilak is megfigyelhe
 A teljes külső perem férjen a kameraképbe; kilógáskor a felület kisebb zoomot kér,
 de nem tiltja le az indítást. A keret mérete szabványos táblaméretből számított
 becslés; egy kameraképből a takart vagy képen kívüli nyílrészletek nem állíthatók vissza.
+
+## Automatikus folytatás és javítható pontbecslés (0.10.0)
+
+A rögzített táblát az időszakos újrakeresés már nem oldja fel. A kameraelmozdulást továbbra is a mozgásellenőrzés kezeli. Automatikus új körnél a korábbi táblavesztési állapot is törlődik.
+
+Figyelés indítása után válaszd a **20-as irányának megjelölése** gombot, majd a kameraképen koppints a 20-as mező külső dupla gyűrűjére. A következő dobásoknál a változó képrész legbelső pontjából kísérleti pontbecslés készül. Iránymegjelölés nélkül is számolja a nyilakat; pontjuk ismeretlen marad. Minden dobás mellett választható a helyes S/D/T mező, bull vagy mellé. Az összeg azonnal frissül, az ismeretleneket külön jelzi. Új körnél a pontlista törlődik. Újrakeresés vagy zoomváltás után az irányt újra meg kell adni.
+
+A szár vagy toll helye nem azonos a becsapódással; a pontérték mindig ellenőrzendő, valós kamerás pontossága még nincs igazolva.

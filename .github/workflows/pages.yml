@@ -42,6 +42,8 @@ jobs:
         run: node tests/edge-hits.test.mjs
       - name: Test manual perspective calibration
         run: node tests/calibration.test.mjs
+      - name: Test score estimates
+        run: node --test tests/scoring.test.mjs
       - name: Upload website
         uses: actions/upload-pages-artifact@v3
         with:

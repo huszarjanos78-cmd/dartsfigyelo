@@ -13,3 +13,11 @@
 .readouts{display:flex;align-items:center;gap:8px;min-width:0;position:relative;padding-top:14px}.readouts>div>span{position:absolute;top:0;left:0;font-size:9px;letter-spacing:.8px;white-space:nowrap}.dashboard #quality{font-size:clamp(20px,6vw,26px);line-height:1;font-weight:500;white-space:nowrap;color:#ffcc78}.dashboard #quality[data-level=good]{color:#ccf279}
 
 .dashboard{grid-template-columns:minmax(108px,1fr) minmax(0,1.4fr)}.dashboard #reset{width:100%;max-width:200px;justify-self:end}
+
+.score-panel { margin: 16px 0; padding: 16px; border: 1px solid #40535b; border-radius: 16px; }
+.score-panel h2 { font-size: 18px; }
+.score-panel p { font-size: 13px; line-height: 1.5; }
+#scores label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
+#scores select { padding: 10px; background: #162830; color: #fff; border: 1px solid #718086; border-radius: 8px; font-size: 16px; }
+
+#overlay { pointer-events: auto; }

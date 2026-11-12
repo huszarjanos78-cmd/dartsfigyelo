@@ -1,6 +1,6 @@
 // Keep the coarse, smoothed motion guard. Use a second, unblurred colour signal
 // only for small, localized changes that persist in the same place over time.
-import { principalSpans } from './change-shape.mjs?v=0.9.1';
+import { principalSpans } from './change-shape.mjs?v=0.10.0';
 export function smallHitEvidence(current, baseline, sensitivity = 3) {
   if (!current.fine || !baseline.fine || !current.gridPositions) return null;
   const count = current.length, size = current.gridSize, means = [0, 0, 0];

@@ -1,8 +1,9 @@
-import { smallHitEvidence, confirmSmallHit } from './hit-evidence.mjs?v=0.9.1';
-import { zoomCrop } from './camera-view.mjs?v=0.9.1';
-import { inspectBoardChange, looksLikeRemoval } from './retrieval-guard.mjs?v=0.9.1';
-import { detectBullBoard } from './bull-vision.mjs?v=0.9.1';
-import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint, BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE } from './board-vision.mjs?v=0.9.1';
+import { estimateHit, boardCoordinates } from './scoring.mjs?v=0.10.0';
+import { smallHitEvidence, confirmSmallHit } from './hit-evidence.mjs?v=0.10.0';
+import { zoomCrop } from './camera-view.mjs?v=0.10.0';
+import { inspectBoardChange, looksLikeRemoval } from './retrieval-guard.mjs?v=0.10.0';
+import { detectBullBoard } from './bull-vision.mjs?v=0.10.0';
+import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint, BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE } from './board-vision.mjs?v=0.10.0';
 
 const $ = id => document.getElementById(id);
 const video = $('video'), overlay = $('overlay'), ctx = overlay.getContext('2d');
@@ -11,7 +12,32 @@ const preview = $('preview'), pc = preview.getContext('2d');
 let zoom = 1, zoomFocus = { x: .5, y: .5 }, previewRequest, emptyBaseline = null, occlusionFrames = 0, recovery = null, smallCandidate = null;
 let stream = null, cv, cvLoading, mode = 'off', candidate = null, locked = null;
 let previousCandidate = null, stableBoards = 0, lostBoards = 0, baseline, previous, stableFrames = 0;
+let roundHits = [], scoreRotation = null, orientingScore = false;
 let count = 0, lastEvent = 0, timer, wake, lastScan = 0, recentHit = 0, generation = 0, boardSampler, motionReference;
+
+
+function renderScores() {
+  const list = $('scores'); list.innerHTML = '';
+  let total = 0, unknown = 0;
+  roundHits.forEach((hit, index) => {
+    const value = hit.corrected || hit.estimate;
+    if (value) total += value.score; else unknown++;
+    const row = document.createElement('label');
+    row.textContent = (index + 1) + '. nyíl · ' + (hit.corrected ? 'javítva' : 'becslés') + ' ';
+    const select = document.createElement('select');
+    select.ariaLabel = (index + 1) + '. nyíl pontértéke';
+    const options = [{ label: 'Ismeretlen — válassz', score: null }, { label: 'Mellé · 0', score: 0, sector: 0, multiplier: 0 }, { label: 'Bull · 25', score: 25, sector: 25, multiplier: 1 }, { label: 'Dupla bull · 50', score: 50, sector: 25, multiplier: 2 }];
+    for (let m = 1; m <= 3; m++) for (let s = 1; s <= 20; s++) options.push({ label: ['','S','D','T'][m] + s + ' · ' + s*m, score: s*m, sector: s, multiplier: m });
+    options.forEach((option, i) => {
+      const item = document.createElement('option'); item.value = String(i); item.textContent = option.label;
+      item.selected = !value ? i === 0 : option.sector === value.sector && option.multiplier === value.multiplier;
+      select.append(item);
+    });
+    select.onchange = () => { const chosen = options[Number(select.value)]; hit.corrected = chosen.score === null ? null : chosen; if (chosen.score === null) hit.estimate = null; renderScores(); };
+    row.append(select); list.append(row);
+  });
+  $('score-total').textContent = String(total) + (unknown ? ' + ' + unknown + ' ismeretlen' : '');
+}
 
 function status(text, state = '') {
   $('status').textContent = text;
@@ -100,8 +126,8 @@ function wholeBoardVisible(e) {
   return true;
 }
 function position(options = {}) {
-  mode = 'positioning'; locked = null; boardSampler = null; previousCandidate = null; candidate = null; stableBoards = 0; lostBoards = 0;
-  if (!options.preserveCount) { count = 0; $('count').textContent = '0'; }
+  scoreRotation = null; orientingScore = false; mode = 'positioning'; locked = null; boardSampler = null; previousCandidate = null; candidate = null; stableBoards = 0; lostBoards = 0;
+  if (!options.preserveCount) { count = 0; roundHits = []; renderScores(); $('count').textContent = '0'; }
   resetComparison(); showQuality(null); draw(); renderControls();
   status('Keresem a bull közepét és a dupla–tripla gyűrűket…');
 }
@@ -163,7 +189,8 @@ function recoverRound(original) {
   }
   const empty = recovery.empty, reference = recovery.reference;
   resetComparison(); motionReference = reference; emptyBaseline = empty; baseline = previous = values;
-  mode = 'watching'; count = 0; $('count').textContent = '0'; renderControls();
+  mode = 'watching'; lostBoards = 0; lastScan = Date.now(); recentHit = 0;
+  count = 0; roundHits = []; renderScores(); $('count').textContent = '0'; renderControls();
   status('Nyilak kiszedve. Új kör — figyelek!', 'good'); speak('Új kör');
 }
 
@@ -236,6 +263,7 @@ function watch(image) {
     pauseForRetrieval('Nyílkiszedéshez hasonló változás.'); return;
   }
   if (detected && Date.now() - lastEvent > 2200) {
+    roundHits.push({ estimate: scoreRotation === null ? null : estimateHit(values, baseline, scoreRotation), corrected: null }); renderScores();
     $('count').textContent = ++count; smallCandidate = null; baseline = values; lastEvent = recentHit = Date.now(); stableFrames = 0;
     status('Nyíl érzékelve · ' + count + '. találat', 'good'); speak('Nyíl érzékelve');
   } else if (Date.now() - recentHit > 2500) status('Figyelek. Jöhet a dobás!', 'good');
@@ -246,7 +274,7 @@ function tick() {
     const image = capture(); if (!image) return;
     if (mode === 'clearing') { recoverRound(image); return; }
     const now = Date.now();
-    if (cv && !locked?.homography && now - lastScan > (mode === 'positioning' ? 550 : 1400)) { lastScan = now; scanBoard(image); }
+    if (cv && !locked && now - lastScan > (mode === 'positioning' ? 550 : 1400)) { lastScan = now; scanBoard(image); }
     if (mode === 'watching' && locked) watch(image);
   } catch (error) { console.error(error); position(); status('A képfeldolgozás megszakadt. Indítsd újra a kamerát.', 'warn'); }
 }
@@ -254,7 +282,7 @@ function stop() {
   generation++; clearInterval(timer); cancelAnimationFrame(previewRequest);
   const old = stream; stream = null; old?.getTracks().forEach(track => track.stop());
   video.srcObject = null; pc.clearRect(0, 0, preview.width, preview.height); mode = 'off'; boardSampler = null; locked = candidate = previousCandidate = null;
-  resetComparison(); stableBoards = 0; count = 0; $('count').textContent = '0';
+  resetComparison(); stableBoards = 0; count = 0; roundHits = []; renderScores(); $('count').textContent = '0';
   wake?.release().catch(() => {}); wake = null; $('placeholder').hidden = false; $('live').textContent = 'KAMERA KIKAPCSOLVA';
   showQuality(null); draw(); renderControls(); status('Kamera leállítva.');
 }
@@ -283,7 +311,7 @@ $('calibrate').onclick = position;
 $('reset').onclick = () => {
   if (!stream || !locked) return;
   if (mode !== 'clearing') { pauseForRetrieval('Kézi szünet.'); }
-  else { count = 0; $('count').textContent = '0'; mode = 'watching'; lostBoards = 0; lastScan = 0; resetComparison(); status('Lépj ki a képből. Új alaphelyzet rögzítése…'); }
+  else { count = 0; roundHits = []; renderScores(); $('count').textContent = '0'; mode = 'watching'; lostBoards = 0; lastScan = 0; resetComparison(); status('Lépj ki a képből. Új alaphelyzet rögzítése…'); }
   renderControls();
 };
 $('zoom').oninput = () => {
@@ -301,6 +329,17 @@ $('zoom').oninput = () => {
   }
 };
 $('sensitivity').oninput = () => { $('svalue').value = $('sensitivity').value; if (mode === 'watching') { previous = null; stableFrames = 0; status('Érzékenység módosítva. A figyelés folytatódik.'); } };
+$('score-orient').onclick = () => {
+  if (!locked) { status('Először indítsd el a figyelést.', 'warn'); return; }
+  orientingScore = true; status('Koppints a 20-as mező közepén a külső dupla gyűrűre.', 'warn');
+};
+$('overlay').onclick = event => {
+  if (!orientingScore || !locked) return;
+  const rect = overlay.getBoundingClientRect();
+  const point = boardCoordinates(locked, (event.clientX-rect.left)*overlay.width/rect.width, (event.clientY-rect.top)*overlay.height/rect.height);
+  if (!point || Math.hypot(point.x,point.y) < .85 || Math.hypot(point.x,point.y) > 1.15) { status('A külső dupla gyűrűre koppints a 20-as mezőnél.', 'warn'); return; }
+  scoreRotation = Math.atan2(point.x,-point.y); orientingScore = false; status('A 20-as iránya rögzítve. A következő dobások pontját becsülöm.', 'good');
+};
 $('sound').onclick = () => speak('Nyíl érzékelve');
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && stream) { keepAwake(); position(); status('Visszatértél az alkalmazáshoz. Ellenőrizd a körvonalat, majd indítsd újra a figyelést.'); }

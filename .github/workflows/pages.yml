@@ -22,6 +22,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install pinned OCR dependencies
+        run: npm ci --ignore-scripts --no-fund --no-audit
+      - name: Prepare local number recognition
+        run: node scripts/prepare-ocr.mjs
       - name: Download and verify OpenCV
         run: node scripts/prepare-opencv.mjs
       - name: Check JavaScript syntax
@@ -44,6 +48,12 @@ jobs:
         run: node tests/calibration.test.mjs
       - name: Test score estimates
         run: node --test tests/scoring.test.mjs
+      - name: Test automatic score orientation
+        run: node --test tests/score-orientation.test.mjs
+      - name: Install browser for automatic orientation test
+        run: npx playwright install --with-deps chromium
+      - name: Test automatic orientation in the browser
+        run: npm run test:browser
       - name: Upload website
         uses: actions/upload-pages-artifact@v3
         with:

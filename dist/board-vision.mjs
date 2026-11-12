@@ -1,6 +1,6 @@
 // Scores describe image geometry and quality; they are not recognition probabilities.
-import { projectPoint } from './calibration.mjs?v=0.10.0';
-export { buildCalibration } from './calibration.mjs?v=0.10.0';
+import { projectPoint } from './calibration.mjs?v=0.11.0';
+export { buildCalibration } from './calibration.mjs?v=0.11.0';
 export const clamp = (n, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, n));
 // Standard 450 mm physical board vs 340 mm outer double-ring diameter.
 export const BOARD_OUTER_RADIUS = 225 / 170;

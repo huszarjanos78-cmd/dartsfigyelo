@@ -8,3 +8,4 @@ Thumbs.db
 .sites-runtime/
 .sites-checkout/
 dist/vendor/opencv.js
+dist/vendor/ocr/

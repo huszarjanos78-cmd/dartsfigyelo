@@ -1,4 +1,4 @@
-import { estimateHit, boardCoordinates } from '../dist/scoring.mjs';
+import { estimateHit } from '../dist/scoring.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
@@ -18,7 +18,7 @@ function app(score = 55, stable = 3) {
     if (!elements.has(id)) elements.set(id, { append() {}, style: {}, checked: false, dataset: {}, getContext: () => drawing });
     return elements.get(id);
   };
-  const context = vm.createContext({ estimateHit, boardCoordinates, BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE, smallHitEvidence, confirmSmallHit, inspectBoardChange, looksLikeRemoval, zoomCrop, frameDifference, buildCalibration, ellipsePoint, sameBoard, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
+  const context = vm.createContext({ setTimeout, clearTimeout, console, createOrientationReader: () => ({read: async () => null, stop() {}}), estimateHit, BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE, smallHitEvidence, confirmSmallHit, inspectBoardChange, looksLikeRemoval, zoomCrop, frameDifference, buildCalibration, ellipsePoint, sameBoard, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
   vm.runInContext(source, context);
   vm.runInContext(`stream = {}; mode = 'positioning'; stableBoards = ${stable}; candidate = { ellipse: { x: 100, y: 100, a: 80, b: 60, angle: 0 }, quality: { score: ${score} } }; renderControls();`, context);
   return { element, context };
@@ -319,26 +319,55 @@ test('Correcting a score updates total and automatic new round clears it',()=>{
  assert.equal(element('score-total').textContent,'0');
 });
 
-test('Orientation uses displayed canvas coordinates and resets after zoom or redetection', () => {
+test('Automatic number recognition starts from a settled baseline without a tap', async () => {
   const {context, element} = app();
-  element('score-orient').onclick();
-  assert.equal(vm.runInContext('orientingScore', context), false);
+  let resolve, reads = 0, stops = 0;
+  context.createOrientationReader = () => ({read: () => { reads++; return new Promise(done => {resolve = done;}); }, stop() {stops++;}});
+  context.prepareMotionFrame = image => image;
+  context.createMotionReference = () => ({});
+  context.estimateCameraShift = () => ({x:0,y:0,error:0});
+  context.pixels = image => image.values;
+  element('sensitivity').value = '3'; element('lock').onclick();
+  vm.runInContext('const cameraImage = {data:new Uint8Array(4), values:new Float32Array(1000).fill(100)}; for(let i=0;i<12;i++)watch(cameraImage);', context);
+  assert.equal(reads, 1);
+  assert.match(element('score-orientation').textContent, /számait olvasom/);
+  resolve(.4);
+  await new Promise(done => setImmediate(done));
+  assert.equal(vm.runInContext('scoreRotation', context), .4);
+  assert.match(element('score-orientation').textContent, /automatikusan felismertem/);
+  assert.equal(stops, 1);
+});
+
+test('Late OCR cannot restore an old orientation after zoom or redetection', async () => {
+  const {context, element} = app();
+  let resolve, stops = 0;
+  context.createOrientationReader = () => ({read: () => new Promise(done => {resolve = done;}), stop() {stops++;}});
   element('lock').onclick();
-  const overlay = element('overlay');
-  overlay.width = 200; overlay.height = 200;
-  overlay.getBoundingClientRect = () => ({left: 10, top: 20, width: 400, height: 400});
-  element('score-orient').onclick();
-  overlay.onclick({clientX: 210, clientY: 220}); // Bull is not an orientation reference.
-  assert.equal(vm.runInContext('scoreRotation', context), null);
-  overlay.onclick({clientX: 370, clientY: 220}); // Right double ring.
-  assert.equal(vm.runInContext('scoreRotation', context), Math.PI/2);
-  assert.equal(vm.runInContext('orientingScore', context), false);
+  vm.runInContext('readScoreOrientation({data:new Uint8Array(4)});', context);
   element('zoom').value = '2'; element('zoom').oninput();
+  resolve(1);
+  await new Promise(done => setImmediate(done));
   assert.equal(vm.runInContext('scoreRotation', context), null);
-  vm.runInContext('scoreRotation = 1; orientingScore = true;', context);
+  assert.ok(stops >= 1);
+  vm.runInContext('scoreRotation = .7;', context);
   element('calibrate').onclick();
   assert.equal(vm.runInContext('scoreRotation', context), null);
-  assert.equal(vm.runInContext('orientingScore', context), false);
+});
+
+test('Unavailable or ambiguous OCR leaves counting active and bounds retries', async () => {
+  const {context, element} = simulatedRound();
+  let reads = 0;
+  context.createOrientationReader = () => ({read: async () => {reads++; return null;}, stop() {}});
+  for (let i = 0; i < 4; i++) {
+    vm.runInContext('nextOrientation = 0; readScoreOrientation({data:new Uint8Array(4)});', context);
+    await new Promise(done => setImmediate(done));
+  }
+  assert.equal(reads, 3);
+  assert.equal(vm.runInContext('scoreRotation', context), null);
+  assert.equal(vm.runInContext('mode', context), 'watching');
+  assert.equal(vm.runInContext('count', context), 1);
+  assert.match(element('score-orientation').textContent, /nem olvashatók/);
+  assert.doesNotMatch(readFileSync(new URL('../dist/index.html', import.meta.url),'utf8'), /score-orient"|irányának megjelölése/);
 });
 
 test('Unknown hits remain countable and can be corrected to a score or unknown', () => {
@@ -353,4 +382,22 @@ test('Unknown hits remain countable and can be corrected to a score or unknown',
   select = rows.at(-1).children[0]; select.value = '0'; select.onchange();
   assert.equal(element('score-total').textContent, '0 + 1 ismeretlen');
   assert.equal(vm.runInContext('count', context), 1);
+});
+
+test('OCR errors and timeouts do not stop watching or change manual score corrections', async () => {
+  for (const timeout of [false,true]) {
+    const {context,element} = simulatedRound();
+    let stopped = 0;
+    context.console = {warn() {}};
+    context.createOrientationReader = () => ({read: () => timeout ? new Promise(()=>{}) : Promise.reject(new Error('Unavailable')), stop() {stopped++;}});
+    if(timeout) context.setTimeout = callback => setTimeout(callback,1);
+    vm.runInContext('roundHits[0].corrected = {score:40,sector:20,multiplier:2}; readScoreOrientation({data:new Uint8Array(4)});',context);
+    await new Promise(resolve=>setTimeout(resolve,10));
+    assert.equal(vm.runInContext('mode',context),'watching');
+    assert.equal(vm.runInContext('scoreRotation',context),null);
+    assert.equal(vm.runInContext('roundHits[0].corrected.score',context),40);
+    assert.equal(vm.runInContext('orientationJob',context),null);
+    assert.match(element('score-orientation').textContent,/nem sikerült/);
+    assert.equal(stopped,1);
+  }
 });

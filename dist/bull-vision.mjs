@@ -1,4 +1,4 @@
-import { ellipsePoint, placementQuality, spokePattern } from './board-vision.mjs?v=0.10.0';
+import { ellipsePoint, placementQuality, spokePattern } from './board-vision.mjs?v=0.11.0';
 
 const isRed = (r, g, b) => r - g > 18 && r > g * 1.25 && r > b * 1.2;
 const isGreen = (r, g, b) => g - r > 12 && g > r * 1.15 && g > b * 1.1;

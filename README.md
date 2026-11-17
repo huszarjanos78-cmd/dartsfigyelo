@@ -192,8 +192,19 @@ A szár vagy toll helye nem azonos a becsapódással; a pontérték mindig ellen
 
 Nem kell a 20-asra koppintani. A figyelés indítása és az üres tábla alaphelyzetének rögzítése után a program automatikusan olvassa le a számozott külső peremet. A peremet a felismert vetület alapján kör alakúra állítja helyre, majd a telefon böngészőjében, háttérfolyamatban futtatja a Tesseract.js 7.0.0 számfelismerőt. Több elfordításban is megpróbálja kiolvasni a számokat. Legalább három különböző számnak kell azonos irányt alátámasztania; egyetlen felismert 20-as nem elegendő.
 
-Az állapot a pontbecslés alatt látható. A teljes számozott perem legyen éles és jól megvilágított. Ha a számok nem olvashatók, a nyílszámlálás tovább működik, és a pontok kézzel megadhatók; ilyenkor nincs feltételezett „20-as felül” irány. Az üres, nyugodt táblán legfeljebb három próbálkozás történik, közöttük legalább 15 másodperc szünettel. Tábla-újrakeresés vagy zoomváltás után újra automatikusan keres. Új körnél a már felismert irány megmarad.
+Az állapot a pontbecslés alatt látható. A teljes számozott perem legyen éles és jól megvilágított. Ha a számok nem olvashatók, a nyílszámlálás tovább működik, és a pontok kézzel megadhatók; ilyenkor nincs feltételezett „20-as felül” irány. A nyugodt képen legfeljebb három próbálkozás történik, közöttük legalább 15 másodperc szünettel. Tábla-újrakeresés vagy zoomváltás után újra automatikusan keres. Új körnél a már felismert irány megmarad.
 
-A felismerő az első használatkor több megabájtnyi helyi fájlt tölt be az oldalról. A kameraképet nem küldi szerverre. A felismerés ideje a telefon sebességétől függ; a nyílszámlálás nem várja meg. A később felismert irány csak a következő dobások pontbecsléséhez használható, a korábbi kézi javításokat megőrzi.
+A felismerő az első használatkor több megabájtnyi helyi fájlt tölt be az oldalról. A kameraképet nem küldi szerverre. A felismerés ideje a telefon sebességétől függ; a nyílszámlálás nem várja meg. A 0.11.1 változattól a később felismert irány az aktuális kör korábbi, ugyanabban a kamerabeállításban rögzített dobásainak pontját is pótolja; a kézi javítások megmaradnak.
 
 A tesztek álló, elfordított, sugárirányú feliratú, más betűtípusú, perspektivikus és számozás nélküli szintetikus táblákat ellenőriznek valódi helyi OCR-rel. Valós drótszámokkal és iPhone/Safari alatt a pontosság még ellenőrzendő; a számláló és a pontbecslés továbbra is kísérleti.
+
+
+## Halvány számok felismerése és később megjelenő pontok (0.11.1)
+
+A számfelismerő külön, legfeljebb 1920 képpontos kameraképet kap a mozgásérzékelés 720 képpontos képe helyett, a zoomkivágást és a tábla vetületét egyeztetve. A normál olvasás sikertelensége után helyi kontrasztjavítással és enyhe vonalvastagítással is próbálkozik. Az irány elfogadásához továbbra is legalább három különböző szám egyezése szükséges.
+
+Ha az első olvasás nem sikerült, nyilakkal a táblában is újrapróbálkozik a nyugodt képen. Három sikertelen próbálkozás után a **Számok újraolvasása** gomb újraindítja az olvasást, a számláló és a pontlista törlése nélkül. Ehhez nem kell a képen semmit pontosan megjelölni. Megfelelő megvilágítás és az éles, látható számozott perem továbbra is szükséges.
+
+A találatok becsült helyét pontérték nélkül is megőrzi az aktuális körben. Ha később sikerül az irányfelismerés, az ezekhez tartozó pontok is megjelennek. A kézzel javított értékeket és a kézzel ismeretlenre állított találatokat nem írja felül. Zoomváltás előtti találatokhoz nem használ új táblavetületet.
+
+Egy halvány, vékony körvonalú szintetikus számozással a korábbi felismerés hibája reprodukálható volt; a kontrasztjavított böngészőteszt sikeres. Ez a felhasználó fizikai tábláján tapasztalt hiba pontos okát és a javítás ottani eredményét még nem igazolja; ehhez valós kamerás próba szükséges.

@@ -26,7 +26,7 @@ try {
   await page.addInitScript(() => {
     // Real canvas video stream: exercise camera startup, OpenCV detection,
     // settling, automatic OCR and scoring controls without a physical camera.
-    window.fixture = (rotation=0, radial=false, numbers=true, font='Arial') => {
+    window.fixture = (rotation=0, radial=false, numbers=true, font='Arial', thin=false) => {
       const canvas=document.createElement('canvas');canvas.width=canvas.height=900;
       const ctx=canvas.getContext('2d');ctx.fillStyle='#656565';ctx.fillRect(0,0,900,900);
       ctx.translate(450,450);ctx.rotate(rotation);ctx.fillStyle='#171717';ctx.beginPath();ctx.arc(0,0,400,0,Math.PI*2);ctx.fill();
@@ -38,8 +38,8 @@ try {
       }
       for(const [r,colour] of [[28,'#18833d'],[11,'#bb2521']]) {ctx.fillStyle=colour;ctx.beginPath();ctx.arc(0,0,r,0,Math.PI*2);ctx.fill();}
       const sectors=[20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
-      ctx.font=`bold 34px ${font}`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='#eee';
-      if(numbers)sectors.forEach((n,i)=>{const angle=i*Math.PI/10;ctx.save();ctx.translate(Math.sin(angle)*360,-Math.cos(angle)*360);if(radial)ctx.rotate(angle);ctx.fillText(String(n),0,0);ctx.restore();});
+      ctx.font=`${thin ? '' : 'bold '}${thin ? 26 : 34}px ${font}`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='#eee';
+      if(numbers)sectors.forEach((n,i)=>{const angle=i*Math.PI/10;ctx.save();ctx.translate(Math.sin(angle)*360,-Math.cos(angle)*360);if(radial)ctx.rotate(angle);if(thin){ctx.strokeStyle='#585858';ctx.lineWidth=.4;ctx.strokeText(String(n),0,0);}else ctx.fillText(String(n),0,0);ctx.restore();});
       return canvas;
     };
     navigator.mediaDevices.getUserMedia = async () => {
@@ -83,15 +83,15 @@ try {
   console.log('Automatic T20 estimate, manual D20 correction and automatic round recovery: passed.');
   // Exercise independently rotated labels and perspective rectification.
   const results=await page.evaluate(async()=>{
-    const {createOrientationReader}=await import('./score-orientation.mjs?v=0.11.0');
+    const {createOrientationReader}=await import('./score-orientation.mjs?v=0.11.1');
     const result=[];
-    for(const [rotation,radial,numbers,font] of [[0,false,true,'Arial'],[2.8,false,true,'Arial'],[1.1,true,true,'Arial'],[-.6,false,true,'Times New Roman'],[0,false,false,'Arial']]) {
-      const canvas=window.fixture(rotation,radial,numbers,font);
+    for(const [rotation,radial,numbers,font,thin] of [[0,false,true,'Arial'],[2.8,false,true,'Arial'],[1.1,true,true,'Arial'],[-.6,false,true,'Times New Roman'],[0,false,false,'Arial'],[.35,true,true,'Arial',true]]) {
+      const canvas=window.fixture(rotation,radial,numbers,font,thin);
       const reader=createOrientationReader();
       const actual=await reader.read(canvas.getContext('2d').getImageData(0,0,900,900),{x:450,y:450,a:300,b:300,angle:0});
-      result.push({rotation,radial,numbers,font,actual});
+      result.push({rotation,radial,numbers,font,thin,actual});
     }
-    const {boardCoordinates} = await import('./scoring.mjs?v=0.11.0');
+    const {boardCoordinates} = await import('./scoring.mjs?v=0.11.1');
     const source=window.fixture(.7), pixels=source.getContext('2d').getImageData(0,0,900,900);
     const homography=[210,20,350,15,260,350,.1,-.04], image={width:700,height:700,data:new Uint8ClampedArray(700*700*4).fill(80)};
     for(let y=0;y<700;y++)for(let x=0;x<700;x++) {
@@ -108,7 +108,7 @@ try {
     if(!r.numbers) assert.equal(r.actual,null,'An unnumbered board must stay unknown');
     else assert.ok(r.actual!==null && Math.abs(Math.atan2(Math.sin(r.actual-r.rotation),Math.cos(r.actual-r.rotation)))<.04,JSON.stringify(r));
   }
-  console.log('Real local OCR: upright, rotated, radial labels, alternate font and unreadable rim passed.');
+  console.log('Real local OCR: upright, rotated, radial labels, alternate font, faint wire-like labels and unreadable rim passed.');
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);assert.deepEqual(failures,[]);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   console.log('No page errors, external image/OCR requests, missing assets or mobile horizontal overflow.');

@@ -47,3 +47,18 @@ test('Number-ring sampling masks the playing field and off-camera pixels', () =>
   const clipped=numberRing({width,height,data},{x:-200,y:-200,a:40,b:40,angle:0},100);
   assert.ok(clipped.data.every(n=>n===255));
 });
+
+test('Contrast fallback makes faint strokes readable without filling the masked field', async () => {
+  const {enhanceNumberRing} = await import('../dist/score-orientation.mjs');
+  const width=60,height=60,data=new Uint8ClampedArray(width*height*4).fill(255);
+  for(let y=10;y<50;y++)for(let x=10;x<50;x++) {
+    const i=(y*width+x)*4,value=x===30 && y>20 && y<40 ? 219 : 232;
+    data[i]=data[i+1]=data[i+2]=value;
+  }
+  const enhanced=enhanceNumberRing({width,height,data});
+  assert.equal(enhanced.data[(30*width+30)*4],0);
+  assert.equal(enhanced.data[(30*width+29)*4],0);
+  assert.equal(enhanced.data[(30*width+40)*4],255);
+  assert.equal(enhanced.data[0],255);
+  assert.equal(data[(30*width+30)*4],219,'Original input must remain available for OCR');
+});

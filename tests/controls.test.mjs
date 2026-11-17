@@ -1,11 +1,11 @@
-import { estimateHit } from '../dist/scoring.mjs';
+import { estimateHit, estimateHitPoint, scoreAt } from '../dist/scoring.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import vm from 'node:vm';
 import { smallHitEvidence, confirmSmallHit } from '../dist/hit-evidence.mjs';
 import { inspectBoardChange, looksLikeRemoval } from '../dist/retrieval-guard.mjs';
-import { zoomCrop } from '../dist/camera-view.mjs';
+import { zoomCrop, rescaleBoard } from '../dist/camera-view.mjs';
 import { createBoardSampler, sampleBoard, BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE } from '../dist/board-vision.mjs';
 import { frameDifference, buildCalibration, ellipsePoint, sameBoard } from '../dist/board-vision.mjs';
 
@@ -18,7 +18,7 @@ function app(score = 55, stable = 3) {
     if (!elements.has(id)) elements.set(id, { append() {}, style: {}, checked: false, dataset: {}, getContext: () => drawing });
     return elements.get(id);
   };
-  const context = vm.createContext({ setTimeout, clearTimeout, console, createOrientationReader: () => ({read: async () => null, stop() {}}), estimateHit, BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE, smallHitEvidence, confirmSmallHit, inspectBoardChange, looksLikeRemoval, zoomCrop, frameDifference, buildCalibration, ellipsePoint, sameBoard, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
+  const context = vm.createContext({ setTimeout, clearTimeout, console, createOrientationReader: () => ({read: async () => null, stop() {}}), estimateHit, estimateHitPoint, scoreAt, BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE, smallHitEvidence, confirmSmallHit, inspectBoardChange, looksLikeRemoval, zoomCrop, rescaleBoard, frameDifference, buildCalibration, ellipsePoint, sameBoard, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
   vm.runInContext(source, context);
   vm.runInContext(`stream = {}; mode = 'positioning'; stableBoards = ${stable}; candidate = { ellipse: { x: 100, y: 100, a: 80, b: 60, angle: 0 }, quality: { score: ${score} } }; renderControls();`, context);
   return { element, context };
@@ -400,4 +400,51 @@ test('OCR errors and timeouts do not stop watching or change manual score correc
     assert.match(element('score-orientation').textContent,/nem sikerült/);
     assert.equal(stopped,1);
   }
+});
+
+test('Number OCR gets a native camera crop with a matching board projection', () => {
+  const {context,element}=app(); element('lock').onclick();
+  element('video').videoWidth=1280; element('video').videoHeight=960;
+  const calls=[],drawing=element('frame').getContext();
+  drawing.drawImage=(...args)=>calls.push(args);
+  drawing.getImageData=(x,y,width,height)=>({width,height,data:new Uint8Array(4)});
+  const result=vm.runInContext('captureNumberFrame({width:720,height:540},locked)',context);
+  assert.equal(result.image.width,1280); assert.equal(result.image.height,960);
+  assert.equal(result.board.homography[2],100*1280/720);
+  assert.deepEqual(calls[0].slice(1),[0,0,1280,960,0,0,1280,960]);
+  vm.runInContext('zoom=2;zoomFocus={x:.7,y:.6};',context);
+  const zoomed=vm.runInContext('captureNumberFrame({width:640,height:480},locked)',context);
+  assert.equal(zoomed.image.width,640); assert.equal(zoomed.image.height,480);
+  assert.deepEqual(calls[1].slice(1),[576,336,640,480,0,0,640,480]);
+});
+
+test('Late orientation fills earlier scores and preserves manual corrections and unknowns', async () => {
+  const {context,element}=simulatedRound(); let resolve;
+  context.createOrientationReader=()=>({read:()=>new Promise(done=>{resolve=done;}),stop(){}});
+  vm.runInContext(`roundHits=[
+    {point:{x:0,y:-.6},board:locked,estimate:null,corrected:null},
+    {point:{x:0,y:-.6},board:locked,estimate:null,corrected:{score:40,sector:20,multiplier:2}},
+    {point:{x:0,y:-.6},board:locked,estimate:null,corrected:null,manuallyUnknown:true},
+    {point:{x:0,y:-.6},board:{},estimate:null,corrected:null}
+  ]; readScoreOrientation({data:new Uint8Array(4)});`,context);
+  resolve(0); await new Promise(done=>setImmediate(done));
+  assert.equal(element('score-total').textContent,'100 + 2 ismeretlen');
+  assert.equal(vm.runInContext('roundHits[0].estimate.score',context),60);
+  assert.equal(vm.runInContext('roundHits[1].corrected.score',context),40);
+  assert.equal(vm.runInContext('roundHits[2].estimate',context),null);
+  assert.equal(vm.runInContext('roundHits[3].estimate',context),null);
+});
+
+test('Retrying exhausted OCR keeps existing hits and restarts on a steady board with darts', async () => {
+  const {context,element}=simulatedRound(); let reads=0;
+  context.createOrientationReader=()=>({read:async()=>{reads++;return null;},stop(){}});
+  vm.runInContext('orientationAttempt=3; nextOrientation=Date.now()+15000; renderControls();',context);
+  assert.equal(element('score-retry').disabled,false);
+  element('score-retry').onclick();
+  assert.equal(vm.runInContext('count',context),1);
+  assert.equal(vm.runInContext('roundHits.length',context),1);
+  vm.runInContext('first.data=new Uint8Array(4); for(let i=0;i<12;i++)watch(first);',context);
+  await new Promise(done=>setImmediate(done));
+  assert.equal(reads,1);
+  assert.equal(vm.runInContext('count',context),1);
 });

@@ -1,4 +1,4 @@
-import { ellipsePoint } from './board-vision.mjs?v=0.11.0';
+import { ellipsePoint } from './board-vision.mjs?v=0.11.1';
 
 const sectors = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
 const step = Math.PI / 10;
@@ -58,6 +58,37 @@ export function numberRing(image, board, size = 800) {
   return {width:size, height:size, data};
 }
 
+// Adaptive contrast and a one-pixel stroke expansion help faint wire numbers.
+// Keep this as a fallback; normal labels are still read from the original crop.
+export function enhanceNumberRing(ring) {
+  const {width:w,height:h,data} = ring, stride = w+1;
+  const integral = new Float64Array((w+1)*(h+1)), counts = new Uint32Array(integral.length);
+  for (let y=0;y<h;y++) {
+    let row=0, samples=0;
+    for(let x=0;x<w;x++) {
+      const value=data[(y*w+x)*4];
+      if(value!==255) {row += value; samples++;}
+      integral[(y+1)*stride+x+1] = integral[y*stride+x+1]+row;
+      counts[(y+1)*stride+x+1] = counts[y*stride+x+1]+samples;
+    }
+  }
+  const mask = new Uint8Array(w*h), output = new Uint8ClampedArray(data.length).fill(255);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++) {
+    const x0=Math.max(0,x-12),x1=Math.min(w,x+13),y0=Math.max(0,y-12),y1=Math.min(h,y+13);
+    const count=counts[y1*stride+x1]-counts[y0*stride+x1]-counts[y1*stride+x0]+counts[y0*stride+x0];
+    if(!count) continue;
+    const mean=(integral[y1*stride+x1]-integral[y0*stride+x1]-integral[y1*stride+x0]+integral[y0*stride+x0])/count;
+    if(data[(y*w+x)*4] < mean-3) mask[y*w+x]=1;
+  }
+  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++) {
+    if(data[(y*w+x)*4]===255) continue; // Preserve the masked field/background.
+    let ink=0;
+    for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)ink ||= mask[(y+dy)*w+x+dx];
+    if(ink) {const i=(y*w+x)*4;output[i]=output[i+1]=output[i+2]=0;}
+  }
+  return {width:w,height:h,data:output};
+}
+
 // Tesseract 7's structured output nests words in blocks/paragraphs/lines.
 export function numberObservations(blocks, size, turns = 0) {
   const result = [], angle = turns*Math.PI/2, c = Math.cos(angle), s = Math.sin(angle);
@@ -107,8 +138,10 @@ export function createOrientationReader() {
         source.getContext('2d').putImageData(new ImageData(ring.data, ring.width, ring.height), 0, 0);
         const canvas = document.createElement('canvas'); canvas.width = canvas.height = ring.width;
         const context = canvas.getContext('2d'), observations = [];
-        const angles = [0, 2, 4, 6, 1, 3, 5, 7].map(n => n*Math.PI/4), tried = [];
-        for (let pass = 0; angles.length && pass < 10 && !stopped; pass++) {
+        const order = [0, 2, 4, 6, 1, 3, 5, 7].map(n => n*Math.PI/4);
+        const angles = [...order], tried = [];
+        let enhanced = false, deskews = 0;
+        for (let pass = 0; angles.length && pass < 20 && !stopped; pass++) {
           const angle = angles.shift(); tried.push(angle);
           context.save(); context.fillStyle = 'white'; context.fillRect(0,0,canvas.width,canvas.height);
           context.translate(canvas.width/2,canvas.height/2); context.rotate(angle);
@@ -124,7 +157,12 @@ export function createOrientationReader() {
           for (const label of found) {
             if (label.text !== '20' || label.confidence < 70 || Math.hypot(label.x,label.y) < 1.04 || Math.hypot(label.x,label.y) > 1.36) continue;
             const deskew = -Math.atan2(label.x,-label.y);
-            if (![...tried,...angles].some(a => Math.abs(wrap(a-deskew)) < .08)) angles.unshift(deskew);
+            if (deskews < 2 && ![...tried,...angles].some(a => Math.abs(wrap(a-deskew)) < .08)) { angles.unshift(deskew); deskews++; }
+          }
+          if (!angles.length && !enhanced) {
+            const contrast = enhanceNumberRing(ring);
+            source.getContext('2d').putImageData(new ImageData(contrast.data,contrast.width,contrast.height),0,0);
+            enhanced = true; deskews = 0; tried.length = 0; angles.push(...order);
           }
         }
         return null;

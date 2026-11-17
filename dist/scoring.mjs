@@ -13,7 +13,7 @@ export function scoreAt(x, y, rotation = 0) {
 }
 // The visible change is often shaft/flight, not the tip: always editable.
 // Use the largest connected component and its innermost point as a rough tip.
-export function estimateHit(current, baseline, rotation = 0) {
+export function estimateHitPoint(current, baseline) {
   if (!current.gridPositions || !current.gridSize || current.length !== baseline.length) return null;
   const size = current.gridSize, radius = current.gridRadius || 1;
   const mask = new Set(); let mean = 0;
@@ -44,7 +44,12 @@ export function estimateHit(current, baseline, rotation = 0) {
   if(best.length<3) return null;
   const points=best.map(p=>({x:(2*(p%size+.5)/size-1)*radius,y:(2*(Math.floor(p/size)+.5)/size-1)*radius}));
   points.sort((a,b)=>Math.hypot(a.x,a.y)-Math.hypot(b.x,b.y));
-  return scoreAt(points[0].x,points[0].y,rotation);
+  return points[0];
+}
+
+export function estimateHit(current, baseline, rotation = 0) {
+  const point = estimateHitPoint(current,baseline);
+  return point ? scoreAt(point.x,point.y,rotation) : null;
 }
 
 export function boardCoordinates(e,x,y) {

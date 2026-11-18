@@ -58,3 +58,15 @@ export function boardCoordinates(e,x,y) {
   if(Math.abs(det)<1e-10) return null;
   return {x:((x-h[2])*d-b*(y-h[5]))/det,y:(a*(y-h[5])-(x-h[2])*c)/det};
 }
+
+
+// The user keeps 20 directly above the bull in the camera image. The sampler's
+// axes can still be rotated by ellipse fitting, so convert screen-up into the
+// board plane instead of assuming that the sampler's rotation is zero.
+export function uprightScoreRotation(board) {
+  const x = board.homography ? board.homography[2] : board.x;
+  const y = board.homography ? board.homography[5] : board.y;
+  const point = boardCoordinates(board,x,y-1);
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y) || Math.hypot(point.x,point.y)<1e-12) return null;
+  return Math.atan2(point.x,-point.y);
+}

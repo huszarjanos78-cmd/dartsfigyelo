@@ -1,11 +1,11 @@
 {
   "name": "dartsfigyelo",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "private": true,
   "scripts": {
     "prepare:ocr": "node scripts/prepare-ocr.mjs",
     "test": "node --test tests/*.test.mjs",
-    "test:browser": "node tests/browser/automatic-orientation.mjs"
+    "test:browser": "node tests/browser/automatic-orientation.mjs && node tests/browser/upright-scoring.mjs"
   },
   "devDependencies": {
     "@tesseract.js-data/eng": "1.0.0",

@@ -42,7 +42,7 @@ node scripts/prepare-opencv.mjs
 npm run prepare:ocr
 ```
 
-Ez letölti az OpenCV.js 4.13.0 hivatalos, ellenőrzőösszeggel rögzített fájlját a `dist/vendor` mappába. A nagy, generált könyvtár nincs a Gitben; a közzétett alkalmazás tartalmazza. A számfelismerő és nyelvi modellje az npm-zárfájlban rögzített csomagokból kerül a `dist/vendor/ocr` mappába. A közzétett oldal minden felismerési fájlt helyben szolgál ki, külső OCR-szolgáltatás nélkül. Alkalmazásfordítás nem szükséges.
+Ez letölti az OpenCV.js 4.13.0 hivatalos, ellenőrzőösszeggel rögzített fájlját a `dist/vendor` mappába. A nagy, generált könyvtár nincs a Gitben; a közzétett alkalmazás tartalmazza. A számleolvasó eszközei és modellje az npm-zárfájlban rögzített csomagokból kerülnek a `dist/vendor/ocr` mappába. Minden felismerés a böngészőben történik, a kamerakép nem kerül szerverre. Alkalmazásfordítás nem szükséges.
 
 ## Fájlok
 
@@ -52,8 +52,9 @@ Ez letölti az OpenCV.js 4.13.0 hivatalos, ellenőrzőösszeggel rögzített fá
 - `dist/board-vision.mjs` – mintavétel, mozgáskompenzáció és az automatikus felismerő.
 - `dist/bull-vision.mjs` – automatikus bull- és gyűrűfelismerés, bullhoz igazított projektív leképezés.
 - `dist/calibration.mjs` – a korábbi kézi kalibrálás matematikai segédfüggvényei.
-- `dist/score-orientation.mjs` – a számozott perem képi helyreállítása és a tábla irányának automatikus felismerése.
-- `scripts/prepare-ocr.mjs` – helyi Tesseract.js és nyelvi modell előkészítése.
+- `dist/scoring.mjs` – javítható pontbecslés és a közép fölötti 20-ashoz tartozó tartalékirány.
+- `dist/score-orientation.mjs` – a tábla irányának meghatározása a leolvasott számokból.
+- `scripts/prepare-ocr.mjs` – helyi számleolvasó és nyelvi modell előkészítése.
 - `scripts/prepare-opencv.mjs` – az OpenCV-függőség ellenőrzött letöltése.
 - `tests/vision.test.mjs` – szintetikus képi ellenőrzések.
 - `.openai/hosting.json` – az eredeti Sites-projekt közzétételi beállítása.
@@ -91,7 +92,7 @@ Az iPhone kamerájának használatához HTTPS-cím kell. A telefonról megnyitot
 A tároló **Settings → Pages → Source** beállítása legyen **GitHub Actions**.
 A `.github/workflows/pages.yml` folyamat minden `main` ágra feltöltött változásnál
 letölti és ellenőrzőösszeggel ellenőrzi az OpenCV-t, lefuttatja a felismerési
-teszteket és a valódi helyi OCR-t használó böngészőpróbát, majd siker esetén közzéteszi a `dist` mappát, az OpenCV-vel és a számfelismerővel együtt.
+teszteket, a számleolvasási és a tartalék pontozási böngészőpróbát, majd siker esetén közzéteszi a `dist` mappát az OpenCV-vel és a helyi számleolvasóval együtt.
 Kézzel is indítható az **Actions → Deploy Dartfigyelő to GitHub Pages → Run workflow**
 lehetőséggel. Az elkészült HTTPS-cím a sikeres futás `deploy` feladatánál és a
 Pages beállításainál jelenik meg. Ez a közzététel a korábbi Sites-címet nem frissíti.
@@ -183,28 +184,23 @@ becslés; egy kameraképből a takart vagy képen kívüli nyílrészletek nem �
 
 A rögzített táblát az időszakos újrakeresés már nem oldja fel. A kameraelmozdulást továbbra is a mozgásellenőrzés kezeli. Automatikus új körnél a korábbi táblavesztési állapot is törlődik.
 
-A 0.10.0 változatban a 20-as irányát kézzel kellett megjelölni. Ezt a 0.11.0 automatikus számfelismerése váltja ki. A következő dobásoknál a változó képrész legbelső pontjából kísérleti pontbecslés készül. Ha az irány felismerése nem sikerül, tovább számolja a nyilakat; pontjuk ismeretlen marad. Minden dobás mellett választható a helyes S/D/T mező, bull vagy mellé. Az összeg azonnal frissül, az ismeretleneket külön jelzi. Új körnél a pontlista törlődik. Újrakeresés vagy zoomváltás után az irányt ismét automatikusan keresi.
+A következő dobásoknál a változó képrész legbelső pontjából kísérleti pontbecslés készül. Minden dobás mellett választható a helyes S/D/T mező, bull vagy mellé. Az összeg azonnal frissül, az ismeretleneket külön jelzi. Új körnél a pontlista törlődik. A 0.11.2 változattól a számleolvasás az elsődleges; bizonytalan eredménynél a közép fölötti 20-as tartalékirányt használja, kézi megjelölés nélkül.
 
 A szár vagy toll helye nem azonos a becsapódással; a pontérték mindig ellenőrzendő, valós kamerás pontossága még nincs igazolva.
 
 
-## Automatikus irányfelismerés (0.11.0)
+## Számleolvasás és „20 felül” tartalék pontozás (0.11.2)
 
-Nem kell a 20-asra koppintani. A figyelés indítása és az üres tábla alaphelyzetének rögzítése után a program automatikusan olvassa le a számozott külső peremet. A peremet a felismert vetület alapján kör alakúra állítja helyre, majd a telefon böngészőjében, háttérfolyamatban futtatja a Tesseract.js 7.0.0 számfelismerőt. Több elfordításban is megpróbálja kiolvasni a számokat. Legalább három különböző számnak kell azonos irányt alátámasztania; egyetlen felismert 20-as nem elegendő.
+A program először a tábla számaiból próbálja meghatározni a 20-as irányát. Ehhez legalább három különböző számnak kell azonos irányt alátámasztania. Az ismételten leolvasott azonos szám nem számít új bizonyítéknak. A jobb felbontású kamerakivágás és a halvány számok kontrasztjavítása megmarad. A számleolvasás helyben, a telefon böngészőjében fut.
 
-Az állapot a pontbecslés alatt látható. A teljes számozott perem legyen éles és jól megvilágított. Ha a számok nem olvashatók, a nyílszámlálás tovább működik, és a pontok kézzel megadhatók; ilyenkor nincs feltételezett „20-as felül” irány. A nyugodt képen legfeljebb három próbálkozás történik, közöttük legalább 15 másodperc szünettel. Tábla-újrakeresés vagy zoomváltás után újra automatikusan keres. Új körnél a már felismert irány megmarad.
+A tábla rögzítésekor ideiglenesen a közép fölötti mezőt veszi 20-asnak, amíg a számleolvasás befejeződik. Így a pontbecslés nem vár a leolvasásra. Ha a leolvasás nem sikerül, ez a tartalékirány marad aktív. A tartalék működéshez a 20-as a kameraképen is a bull közvetlenül fölött legyen. A többi mező a szabványos sorrendet követi:
 
-A felismerő az első használatkor több megabájtnyi helyi fájlt tölt be az oldalról. A kameraképet nem küldi szerverre. A felismerés ideje a telefon sebességétől függ; a nyílszámlálás nem várja meg. A 0.11.1 változattól a később felismert irány az aktuális kör korábbi, ugyanabban a kamerabeállításban rögzített dobásainak pontját is pótolja; a kézi javítások megmaradnak.
+20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5.
 
-A tesztek álló, elfordított, sugárirányú feliratú, más betűtípusú, perspektivikus és számozás nélküli szintetikus táblákat ellenőriznek valódi helyi OCR-rel. Valós drótszámokkal és iPhone/Safari alatt a pontosság még ellenőrzendő; a számláló és a pontbecslés továbbra is kísérleti.
+A **Pontbecslés** alatti állapot mindig jelzi, hogy még folyamatban van a leolvasás, a leolvasott számok alapján pontoz, vagy a „20 felül” tartalékirányt használja. A kameraképen a 20-as jelölés az aktuálisan használt irányt mutatja.
 
+Sikeres számleolvasáskor az elsődleges irány veszi át a pontozást. Az ugyanabban a kamerabeállításban rögzített korábbi, nem javított dobások becslését is ehhez igazítja. A kézzel javított és a kézzel ismeretlenre állított találatokat nem írja felül. Sikertelen leolvasáskor a meglévő tartalék pontok nem tűnnek el.
 
-## Halvány számok felismerése és később megjelenő pontok (0.11.1)
+Legfeljebb három automatikus próbálkozás történik a nyugodt képen, akár nyilakkal a táblában is. A **Számok újraolvasása** gomb a számláló törlése nélkül indít új próbát. Sikeres leolvasás után az irány rögzített marad. Zoomváltás vagy tábla-újrakeresés érvényteleníti a korábbi leolvasási feladatot; új rögzítésnél ismét a leolvasás az elsődleges, a felső 20-as pedig az ideiglenes tartalék.
 
-A számfelismerő külön, legfeljebb 1920 képpontos kameraképet kap a mozgásérzékelés 720 képpontos képe helyett, a zoomkivágást és a tábla vetületét egyeztetve. A normál olvasás sikertelensége után helyi kontrasztjavítással és enyhe vonalvastagítással is próbálkozik. Az irány elfogadásához továbbra is legalább három különböző szám egyezése szükséges.
-
-Ha az első olvasás nem sikerült, nyilakkal a táblában is újrapróbálkozik a nyugodt képen. Három sikertelen próbálkozás után a **Számok újraolvasása** gomb újraindítja az olvasást, a számláló és a pontlista törlése nélkül. Ehhez nem kell a képen semmit pontosan megjelölni. Megfelelő megvilágítás és az éles, látható számozott perem továbbra is szükséges.
-
-A találatok becsült helyét pontérték nélkül is megőrzi az aktuális körben. Ha később sikerül az irányfelismerés, az ezekhez tartozó pontok is megjelennek. A kézzel javított értékeket és a kézzel ismeretlenre állított találatokat nem írja felül. Zoomváltás előtti találatokhoz nem használ új táblavetületet.
-
-Egy halvány, vékony körvonalú szintetikus számozással a korábbi felismerés hibája reprodukálható volt; a kontrasztjavított böngészőteszt sikeres. Ez a felhasználó fizikai tábláján tapasztalt hiba pontos okát és a javítás ottani eredményét még nem igazolja; ehhez valós kamerás próba szükséges.
+A böngészőpróbák valódi helyi számleolvasást és számozás nélküli képen a tartalék pontozást is ellenőrzik: tábla-rögzítés, tripla 20 (60 pont), kézi javítás és automatikus új kör. Valós iPhone-os próba továbbra is szükséges. A nyíl helyéből becsült pont kísérleti, kézzel javítható érték; a szár és toll eltérhet a tényleges becsapódási ponttól.

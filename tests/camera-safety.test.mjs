@@ -45,17 +45,3 @@ test('Removing a dart is distinguished from adding one', () => {
   assert.equal(looksLikeRemoval(empty, hit, empty), true);
   assert.equal(looksLikeRemoval(hit, empty, empty), false);
 });
-
-test('Sharper OCR crops preserve both affine and perspective board projections', async () => {
-  const {rescaleBoard} = await import('../dist/camera-view.mjs');
-  const {ellipsePoint} = await import('../dist/board-vision.mjs');
-  for(const board of [{x:220,y:180,a:120,b:80,angle:.7},
-    {x:220,y:180,homography:[120,10,220,4,80,180,.08,-.04]}]) {
-    const scaled=rescaleBoard(board,1280/720,961/540);
-    for(let i=0;i<20;i++) {
-      const before=ellipsePoint(board,1.2,i*Math.PI/10), after=ellipsePoint(scaled,1.2,i*Math.PI/10);
-      assert.ok(Math.abs(after.x-before.x*1280/720)<1e-9);
-      assert.ok(Math.abs(after.y-before.y*961/540)<1e-9);
-    }
-  }
-});

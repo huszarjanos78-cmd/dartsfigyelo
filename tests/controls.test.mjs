@@ -1,4 +1,4 @@
-import { estimateHit, estimateHitPoint, scoreAt } from '../dist/scoring.mjs';
+import { estimateHit, estimateHitPoint, scoreAt, uprightScoreRotation } from '../dist/scoring.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
@@ -18,7 +18,7 @@ function app(score = 55, stable = 3) {
     if (!elements.has(id)) elements.set(id, { append() {}, style: {}, checked: false, dataset: {}, getContext: () => drawing });
     return elements.get(id);
   };
-  const context = vm.createContext({ setTimeout, clearTimeout, console, createOrientationReader: () => ({read: async () => null, stop() {}}), estimateHit, estimateHitPoint, scoreAt, BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE, smallHitEvidence, confirmSmallHit, inspectBoardChange, looksLikeRemoval, zoomCrop, rescaleBoard, frameDifference, buildCalibration, ellipsePoint, sameBoard, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
+  const context = vm.createContext({ setTimeout, clearTimeout, console, createOrientationReader: () => ({read: async () => null, stop() {}}), estimateHit, estimateHitPoint, scoreAt, uprightScoreRotation, BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE, smallHitEvidence, confirmSmallHit, inspectBoardChange, looksLikeRemoval, zoomCrop, rescaleBoard, frameDifference, buildCalibration, ellipsePoint, sameBoard, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
   vm.runInContext(source, context);
   vm.runInContext(`stream = {}; mode = 'positioning'; stableBoards = ${stable}; candidate = { ellipse: { x: 100, y: 100, a: 80, b: 60, angle: 0 }, quality: { score: ${score} } }; renderControls();`, context);
   return { element, context };
@@ -334,7 +334,7 @@ test('Automatic number recognition starts from a settled baseline without a tap'
   resolve(.4);
   await new Promise(done => setImmediate(done));
   assert.equal(vm.runInContext('scoreRotation', context), .4);
-  assert.match(element('score-orientation').textContent, /automatikusan felismertem/);
+  assert.match(element('score-orientation').textContent, /Számleolvasás alapján/);
   assert.equal(stops, 1);
 });
 
@@ -363,10 +363,11 @@ test('Unavailable or ambiguous OCR leaves counting active and bounds retries', a
     await new Promise(done => setImmediate(done));
   }
   assert.equal(reads, 3);
-  assert.equal(vm.runInContext('scoreRotation', context), null);
+  assert.equal(vm.runInContext('scoreRotation', context), 0);
+  assert.equal(vm.runInContext('scoreMethod', context), 'upright');
   assert.equal(vm.runInContext('mode', context), 'watching');
   assert.equal(vm.runInContext('count', context), 1);
-  assert.match(element('score-orientation').textContent, /nem olvashatók/);
+  assert.match(element('score-orientation').textContent, /nem adott biztos irányt/);
   assert.doesNotMatch(readFileSync(new URL('../dist/index.html', import.meta.url),'utf8'), /score-orient"|irányának megjelölése/);
 });
 
@@ -394,7 +395,8 @@ test('OCR errors and timeouts do not stop watching or change manual score correc
     vm.runInContext('roundHits[0].corrected = {score:40,sector:20,multiplier:2}; readScoreOrientation({data:new Uint8Array(4)});',context);
     await new Promise(resolve=>setTimeout(resolve,10));
     assert.equal(vm.runInContext('mode',context),'watching');
-    assert.equal(vm.runInContext('scoreRotation',context),null);
+    assert.equal(vm.runInContext('scoreRotation',context),0);
+    assert.equal(vm.runInContext('scoreMethod',context),'upright');
     assert.equal(vm.runInContext('roundHits[0].corrected.score',context),40);
     assert.equal(vm.runInContext('orientationJob',context),null);
     assert.match(element('score-orientation').textContent,/nem sikerült/);
@@ -447,4 +449,37 @@ test('Retrying exhausted OCR keeps existing hits and restarts on a steady board 
   await new Promise(done=>setImmediate(done));
   assert.equal(reads,1);
   assert.equal(vm.runInContext('count',context),1);
+});
+
+test('Primary number reading replaces provisional upright scores without changing manual values', async () => {
+  const {context,element}=app(); let resolve;
+  context.createOrientationReader=()=>({read:()=>new Promise(done=>{resolve=done;}),stop(){}});
+  element('lock').onclick();
+  assert.equal(vm.runInContext('scoreMethod',context),'upright');
+  vm.runInContext(`roundHits=[
+    {point:{x:0,y:-.6},board:locked,method:'upright',estimate:{score:60,sector:20,multiplier:3},corrected:null},
+    {point:{x:0,y:-.6},board:locked,method:'upright',estimate:{score:60,sector:20,multiplier:3},corrected:{score:40,sector:20,multiplier:2}},
+    {point:{x:0,y:-.6},board:locked,method:'upright',estimate:null,corrected:null,manuallyUnknown:true}
+  ]; renderScores(); readScoreOrientation({data:new Uint8Array(4)});`,context);
+  assert.equal(element('score-total').textContent,'100 + 1 ismeretlen');
+  assert.match(element('score-orientation').textContent,/ideiglenes pontozás/);
+  resolve(Math.PI/2); await new Promise(done=>setImmediate(done));
+  assert.equal(vm.runInContext('scoreMethod',context),'ocr');
+  assert.equal(vm.runInContext('roundHits[0].estimate.score',context),33);
+  assert.equal(vm.runInContext('roundHits[0].method',context),'ocr');
+  assert.equal(element('score-total').textContent,'73 + 1 ismeretlen');
+  assert.equal(element('score-retry').hidden,true);
+});
+
+test('An unreadable number ring keeps the upright direction and existing provisional scores', async () => {
+  const {context,element}=app();
+  context.createOrientationReader=()=>({read:async()=>null,stop(){}});
+  element('lock').onclick();
+  vm.runInContext('roundHits=[{estimate:{score:60,sector:20,multiplier:3},corrected:null,method:"upright"}];renderScores();readScoreOrientation({data:new Uint8Array(4)});',context);
+  await new Promise(done=>setImmediate(done));
+  assert.equal(vm.runInContext('scoreRotation',context),0);
+  assert.equal(vm.runInContext('scoreMethod',context),'upright');
+  assert.equal(element('score-total').textContent,'60');
+  assert.match(element('score-orientation').textContent,/Tartalék pontozás: 20 felül/);
+  assert.equal(element('score-retry').disabled,false);
 });

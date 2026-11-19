@@ -53,3 +53,28 @@ test('Fine colour evidence uses the sampler radius and ignores uniform exposure'
   for (let y = 15; y < 29; y++) for (let x = 49; x < 51; x++) current.fine[(y*size+x)*3] = 210;
   assert.equal(estimateHit(current, base).score, 60);
 });
+
+test('Screen-up is 20 for rotated ellipse axes and perspective board projections', async () => {
+  const {uprightScoreRotation} = await import('../dist/scoring.mjs');
+  const {ellipsePoint} = await import('../dist/board-vision.mjs');
+  const boards = [0,.7,Math.PI/2,2.75].map(angle=>({x:220,y:180,a:120,b:70,angle}));
+  boards.push({x:220,y:180,homography:[-90,-45,220,45,-70,180,.1,-.06]});
+  for(const board of boards) {
+    const rotation=uprightScoreRotation(board), center=ellipsePoint(board,0,0);
+    assert.ok(Number.isFinite(rotation));
+    const up=boardCoordinates(board,center.x,center.y-25);
+    assert.equal(scoreAt(up.x,up.y,rotation).sector,20);
+    const top=ellipsePoint(board,.6,rotation-Math.PI/2);
+    assert.ok(Math.abs(top.x-center.x)<1e-8 && top.y<center.y,'20 must be vertically above the bull');
+    assert.equal(scoreAt(Math.sin(rotation)*.6,-Math.cos(rotation)*.6,rotation).score,60);
+    assert.equal(scoreAt(-Math.sin(rotation)*.6,Math.cos(rotation)*.6,rotation).score,9);
+    assert.equal(scoreAt(Math.sin(rotation+Math.PI/10)*.8,-Math.cos(rotation+Math.PI/10)*.8,rotation).sector,1);
+    assert.equal(scoreAt(Math.sin(rotation-Math.PI/10)*.8,-Math.cos(rotation-Math.PI/10)*.8,rotation).sector,5);
+  }
+});
+
+test('Invalid projections cannot silently select a scoring direction', async () => {
+  const {uprightScoreRotation} = await import('../dist/scoring.mjs');
+  assert.equal(uprightScoreRotation({x:0,y:0,a:0,b:0,angle:0}),null);
+  assert.equal(uprightScoreRotation({homography:[0,0,0,0,0,0,0,0]}),null);
+});

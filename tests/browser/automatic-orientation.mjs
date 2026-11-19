@@ -60,7 +60,7 @@ try {
   await page.locator('#lock').click();
   console.log('Board locked.');
   try {
-    await page.waitForFunction(()=>document.getElementById('score-orientation').textContent.includes('automatikusan felismertem'),{},{timeout:60000});
+    await page.waitForFunction(()=>document.getElementById('score-orientation').textContent.includes('Számleolvasás alapján'),{},{timeout:60000});
   } catch(error) {
     console.log(await page.locator('#status').innerText(), await page.locator('#score-orientation').innerText());
     console.log('Page errors:',errors);
@@ -79,11 +79,11 @@ try {
   await page.evaluate(()=>{const ctx=window.cameraFixture.getContext('2d');ctx.save();ctx.resetTransform();ctx.drawImage(window.fixture(.48),0,0);ctx.restore();});
   await page.waitForFunction(()=>document.getElementById('count').textContent==='0',{},{timeout:20000});
   assert.equal(await page.locator('#score-total').innerText(),'0');
-  assert.match(await page.locator('#score-orientation').innerText(),/automatikusan felismertem/);
+  assert.match(await page.locator('#score-orientation').innerText(),/Számleolvasás alapján/);
   console.log('Automatic T20 estimate, manual D20 correction and automatic round recovery: passed.');
   // Exercise independently rotated labels and perspective rectification.
   const results=await page.evaluate(async()=>{
-    const {createOrientationReader}=await import('./score-orientation.mjs?v=0.11.1');
+    const {createOrientationReader}=await import('./score-orientation.mjs?v=0.11.2');
     const result=[];
     for(const [rotation,radial,numbers,font,thin] of [[0,false,true,'Arial'],[2.8,false,true,'Arial'],[1.1,true,true,'Arial'],[-.6,false,true,'Times New Roman'],[0,false,false,'Arial'],[.35,true,true,'Arial',true]]) {
       const canvas=window.fixture(rotation,radial,numbers,font,thin);
@@ -91,7 +91,7 @@ try {
       const actual=await reader.read(canvas.getContext('2d').getImageData(0,0,900,900),{x:450,y:450,a:300,b:300,angle:0});
       result.push({rotation,radial,numbers,font,thin,actual});
     }
-    const {boardCoordinates} = await import('./scoring.mjs?v=0.11.1');
+    const {boardCoordinates} = await import('./scoring.mjs?v=0.11.2');
     const source=window.fixture(.7), pixels=source.getContext('2d').getImageData(0,0,900,900);
     const homography=[210,20,350,15,260,350,.1,-.04], image={width:700,height:700,data:new Uint8ClampedArray(700*700*4).fill(80)};
     for(let y=0;y<700;y++)for(let x=0;x<700;x++) {

@@ -1,10 +1,10 @@
-import { createOrientationReader } from './score-orientation.mjs?v=0.11.1';
-import { estimateHitPoint, scoreAt } from './scoring.mjs?v=0.11.1';
-import { smallHitEvidence, confirmSmallHit } from './hit-evidence.mjs?v=0.11.1';
-import { zoomCrop, rescaleBoard } from './camera-view.mjs?v=0.11.1';
-import { inspectBoardChange, looksLikeRemoval } from './retrieval-guard.mjs?v=0.11.1';
-import { detectBullBoard } from './bull-vision.mjs?v=0.11.1';
-import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint, BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE } from './board-vision.mjs?v=0.11.1';
+import { createOrientationReader } from './score-orientation.mjs?v=0.11.2';
+import { estimateHitPoint, scoreAt, uprightScoreRotation } from './scoring.mjs?v=0.11.2';
+import { smallHitEvidence, confirmSmallHit } from './hit-evidence.mjs?v=0.11.2';
+import { zoomCrop, rescaleBoard } from './camera-view.mjs?v=0.11.2';
+import { inspectBoardChange, looksLikeRemoval } from './retrieval-guard.mjs?v=0.11.2';
+import { detectBullBoard } from './bull-vision.mjs?v=0.11.2';
+import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint, BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE } from './board-vision.mjs?v=0.11.2';
 
 const $ = id => document.getElementById(id);
 const video = $('video'), overlay = $('overlay'), ctx = overlay.getContext('2d');
@@ -14,7 +14,7 @@ const numberFrame = document.createElement('canvas'), nc = numberFrame.getContex
 let zoom = 1, zoomFocus = { x: .5, y: .5 }, previewRequest, emptyBaseline = null, occlusionFrames = 0, recovery = null, smallCandidate = null;
 let stream = null, cv, cvLoading, mode = 'off', candidate = null, locked = null;
 let previousCandidate = null, stableBoards = 0, lostBoards = 0, baseline, previous, stableFrames = 0;
-let roundHits = [], scoreRotation = null, orientationJob = null, orientationAttempt = 0, nextOrientation = 0;
+let roundHits = [], scoreRotation = null, scoreMethod = 'none', orientationJob = null, orientationAttempt = 0, nextOrientation = 0;
 let count = 0, lastEvent = 0, timer, wake, lastScan = 0, recentHit = 0, generation = 0, boardSampler, motionReference;
 
 
@@ -25,7 +25,7 @@ function renderScores() {
     const value = hit.corrected || hit.estimate;
     if (value) total += value.score; else unknown++;
     const row = document.createElement('label');
-    row.textContent = (index + 1) + '. nyíl · ' + (hit.corrected ? 'javítva' : 'becslés') + ' ';
+    row.textContent = (index + 1) + '. nyíl · ' + (hit.corrected ? 'javítva' : hit.method === 'upright' ? 'becslés · 20 felül' : 'becslés') + ' ';
     const select = document.createElement('select');
     select.ariaLabel = (index + 1) + '. nyíl pontértéke';
     const options = [{ label: 'Ismeretlen — válassz', score: null }, { label: 'Mellé · 0', score: 0, sector: 0, multiplier: 0 }, { label: 'Bull · 25', score: 25, sector: 25, multiplier: 1 }, { label: 'Dupla bull · 50', score: 50, sector: 25, multiplier: 2 }];
@@ -43,8 +43,27 @@ function renderScores() {
 
 function resetScoreOrientation() {
   orientationJob?.cancel(); orientationJob?.reader.stop(); orientationJob = null;
-  scoreRotation = null; orientationAttempt = 0; nextOrientation = 0;
-  $('score-orientation').textContent = 'A számok irányát figyelés indítása után automatikusan felismerem.';
+  scoreRotation = null; scoreMethod = 'none'; orientationAttempt = 0; nextOrientation = 0;
+  $('score-orientation').textContent = 'Először számleolvasással keresem az irányt. Ha nem sikerül: 20 felül, a közép fölött.';
+}
+function setUprightOrientation() {
+  scoreRotation = uprightScoreRotation(locked);
+  scoreMethod = scoreRotation === null ? 'none' : 'upright';
+  $('score-orientation').textContent = 'A számleolvasás a nyugodt képen indul. Addig ideiglenes pontozás: 20 felül, a közép fölött.';
+}
+function applyScoreOrientation(rotation) {
+  if (rotation !== null) {
+    scoreRotation = rotation; scoreMethod = 'ocr';
+    for (const hit of roundHits) if (hit.board === locked && hit.point && !hit.corrected && !hit.manuallyUnknown) {
+      hit.estimate = scoreAt(hit.point.x,hit.point.y,rotation); hit.method = 'ocr';
+    }
+    renderScores(); draw();
+  }
+}
+function fallbackMessage() {
+  return scoreMethod === 'upright' ?
+    'Tartalék pontozás: 20 felül, a közép fölött. A 20-as a kameraképen is felül legyen.' :
+    'A tábla vetülete nem megfelelő. Keresd újra a táblát.';
 }
 function captureNumberFrame(image, board) {
   if (!video.videoWidth || !video.videoHeight || !image.width || !image.height) return {image, board};
@@ -56,11 +75,11 @@ function captureNumberFrame(image, board) {
   return {image:nc.getImageData(0,0,w,h), board:rescaleBoard(board,w/image.width,h/image.height)};
 }
 function readScoreOrientation(image) {
-  if (!locked || mode !== 'watching' || scoreRotation !== null || orientationJob ||
+  if (!locked || mode !== 'watching' || scoreMethod === 'ocr' || orientationJob ||
       orientationAttempt >= 3 || Date.now() < nextOrientation || !image.data) return;
   const reader = createOrientationReader(), job = {reader, board: locked};
   orientationJob = job; orientationAttempt++; renderControls();
-  $('score-orientation').textContent = 'A tábla számait olvasom… Nem kell koppintanod.';
+  $('score-orientation').textContent = 'A tábla számait olvasom… Addig ideiglenes pontozás: 20 felül.';
   let timeout;
   const cancelled = new Promise(resolve => { job.cancel = () => resolve(null); });
   const limit = new Promise((_, reject) => {
@@ -72,19 +91,14 @@ function readScoreOrientation(image) {
     return reader.read(input.image, input.board);
   })(), limit, cancelled]).then(rotation => {
     if (orientationJob !== job || locked !== job.board) return;
-    scoreRotation = rotation;
-    if (rotation !== null) {
-      for (const hit of roundHits) if (hit.board === job.board && hit.point && !hit.corrected && !hit.manuallyUnknown)
-        hit.estimate = scoreAt(hit.point.x,hit.point.y,rotation);
-      renderScores();
-    }
+    applyScoreOrientation(rotation);
     $('score-orientation').textContent = rotation === null ?
-      'A számok még nem olvashatók. A teljes számozott perem legyen éles és takarásmentes. A pontok kézzel javíthatók.' :
-      'A számok irányát automatikusan felismertem. Az ebben a beállításban rögzített dobások pontját is frissítem.';
+      'A számleolvasás nem adott biztos irányt. ' + fallbackMessage() :
+      'Számleolvasás alapján pontozok. A korábbi, nem javított találatok pontját is frissítettem.';
   }).catch(error => {
     if (orientationJob !== job) return;
     console.warn('Score orientation:', error);
-    $('score-orientation').textContent = 'A számfelismerés most nem sikerült. A nyilakat számolom, a pontok kézzel megadhatók.';
+    $('score-orientation').textContent = 'A számleolvasás most nem sikerült. ' + fallbackMessage();
   }).finally(() => {
     clearTimeout(timeout); reader.stop();
     if (orientationJob === job) { orientationJob = null; nextOrientation = Date.now()+15000; renderControls(); }
@@ -129,8 +143,8 @@ function canStartWatching() {
 }
 function renderControls() {
   $('zoom').disabled = !stream;
-  $('score-retry').disabled = mode !== 'watching' || !locked || !!orientationJob || scoreRotation !== null;
-  $('score-retry').hidden = scoreRotation !== null;
+  $('score-retry').disabled = mode !== 'watching' || !locked || !!orientationJob || scoreMethod === 'ocr';
+  $('score-retry').hidden = scoreMethod === 'ocr';
   $('reset').dataset.state = mode === 'clearing' ? 'paused' : 'watching';
   $('start').textContent = stream ? 'Kamera leállítása' : 'Kamera bekapcsolása ↗';
   $('lock').hidden = !stream || mode === 'watching' || mode === 'clearing';
@@ -169,6 +183,11 @@ function draw() {
   ctx.stroke();
   ctx.setLineDash([]); ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(e.x - 8, e.y); ctx.lineTo(e.x + 8, e.y); ctx.moveTo(e.x, e.y - 8); ctx.lineTo(e.x, e.y + 8); ctx.stroke();
+  if (locked && scoreRotation !== null) {
+    const top = ellipsePoint(locked,1.18,scoreRotation-Math.PI/2);
+    ctx.fillStyle = '#ccf279'; ctx.font = 'bold 14px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.fillText('20',top.x,top.y);
+  }
   ctx.restore();
 }
 function wholeBoardVisible(e) {
@@ -319,7 +338,7 @@ function watch(image) {
   }
   if (detected && Date.now() - lastEvent > 2200) {
     const point = estimateHitPoint(values, baseline);
-    roundHits.push({ point, board:locked, estimate: point && scoreRotation !== null ? scoreAt(point.x,point.y,scoreRotation) : null, corrected: null }); renderScores();
+    roundHits.push({ point, board:locked, method:scoreMethod, estimate: point && scoreRotation !== null ? scoreAt(point.x,point.y,scoreRotation) : null, corrected: null }); renderScores();
     $('count').textContent = ++count; smallCandidate = null; baseline = values; lastEvent = recentHit = Date.now(); stableFrames = 0;
     status('Nyíl érzékelve · ' + count + '. találat', 'good'); speak('Nyíl érzékelve');
   } else if (Date.now() - recentHit > 2500) status('Figyelek. Jöhet a dobás!', 'good');
@@ -360,7 +379,7 @@ $('start').onclick = async () => {
 };
 $('lock').onclick = () => {
   if (!canStartWatching()) return;
-  locked = { ...candidate.ellipse }; boardSampler = null; mode = 'watching'; lostBoards = 0; resetComparison(); draw(); renderControls();
+  locked = { ...candidate.ellipse }; setUprightOrientation(); boardSampler = null; mode = 'watching'; lostBoards = 0; resetComparison(); draw(); renderControls();
   status('Lépj ki a képből. Az üres tábla alaphelyzetét rögzítem…'); speak('Figyelés indítása');
 };
 $('calibrate').onclick = position;
@@ -386,9 +405,9 @@ $('zoom').oninput = () => {
 };
 $('sensitivity').oninput = () => { $('svalue').value = $('sensitivity').value; if (mode === 'watching') { previous = null; stableFrames = 0; status('Érzékenység módosítva. A figyelés folytatódik.'); } };
 $('score-retry').onclick = () => {
-  if (mode !== 'watching' || !locked || orientationJob || scoreRotation !== null) return;
+  if (mode !== 'watching' || !locked || orientationJob || scoreMethod === 'ocr') return;
   orientationAttempt = 0; nextOrientation = 0;
-  $('score-orientation').textContent = 'Újra megpróbálom a nyugodt képen. A számozott perem legyen jól látható.';
+  $('score-orientation').textContent = 'Újra megpróbálom a számleolvasást a nyugodt képen. Addig a tartalék pontozás működik: 20 felül.';
 };
 $('sound').onclick = () => speak('Nyíl érzékelve');
 document.addEventListener('visibilitychange', () => {

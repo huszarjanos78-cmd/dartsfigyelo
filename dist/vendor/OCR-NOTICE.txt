@@ -1,0 +1,12 @@
+Number recognition uses Tesseract.js 7.0.0 and tesseract.js-core 7.0.0.
+https://github.com/naptha/tesseract.js
+https://github.com/naptha/tesseract.js-core
+Both are distributed under Apache-2.0; their license texts are included in ocr/.
+
+The English integer LSTM model is distributed by @tesseract.js-data/eng 1.0.0
+(4.0.0_best_int), from the Tesseract English tessdata_best model (Apache-2.0).
+https://github.com/naptha/tessdata
+https://github.com/tesseract-ocr/tessdata_best
+The npm packaging is MIT-licensed. See package-lock.json for exact versions
+and integrity hashes. Models and WebAssembly assets are prepared at build time;
+no camera images are sent to an OCR service.

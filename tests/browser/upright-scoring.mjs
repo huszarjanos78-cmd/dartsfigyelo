@@ -51,7 +51,7 @@ try {
   await page.locator('#voice').uncheck();
   await page.locator('summary').click();
   assert.equal(await page.locator('#score-orient').count(),0);
-  assert.equal(await page.locator('#score-retry').count(),0);
+  assert.equal(await page.locator('#score-retry').count(),1);
   await page.locator('#start').click();
   console.log('Camera started.');
   await page.waitForFunction(()=>!document.getElementById('lock').disabled,{},{timeout:60000});
@@ -59,8 +59,9 @@ try {
   console.log('Board locked.');
   assert.match(await page.locator('#score-orientation').innerText(), /20 felül/);
   await page.waitForFunction(()=>document.getElementById('status').textContent.includes('Jöhet a dobás'),{},{timeout:20000});
+  await page.waitForFunction(()=>document.getElementById('score-orientation').textContent.includes('Tartalék pontozás'),{},{timeout:10000});
   assert.equal(await page.locator('#count').innerText(),'0');
-  console.log('Number-free camera image → OpenCV lock → immediate upright scoring: passed.');
+  console.log('Unreadable number-free image → actual number reader → upright fallback scoring: passed.');
   await page.evaluate(()=>{
     const context=window.cameraFixture.getContext('2d');context.save();
     context.strokeStyle='#fefefe';context.lineWidth=5;context.beginPath();context.moveTo(0,-181);context.lineTo(0,-240);context.stroke();context.restore();
@@ -74,7 +75,8 @@ try {
   assert.equal(await page.locator('#score-total').innerText(),'0');
   assert.match(await page.locator('#score-orientation').innerText(),/20 felül/);
   console.log('Automatic T20 estimate, manual D20 correction and automatic round recovery: passed.');
-  assert.deepEqual(ocrRequests,[],'Scoring must not load any OCR library, model or worker');
+  assert.ok(ocrRequests.some(url=>url.endsWith('/eng.traineddata.gz')),'Number reading must actually run before the fallback is confirmed');
+  assert.match(await page.locator('#score-orientation').innerText(),/nem adott biztos irányt/);
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);assert.deepEqual(failures,[]);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   console.log('No page errors, external image/OCR requests, missing assets or mobile horizontal overflow.');

@@ -1,6 +1,6 @@
-import { frameDifference } from './board-vision.mjs?v=0.11.2';
-import { fineChangeRatio } from './hit-evidence.mjs?v=0.11.2';
-import { principalSpans } from './change-shape.mjs?v=0.11.2';
+import { frameDifference } from './board-vision.mjs?v=0.12.0';
+import { fineChangeRatio } from './hit-evidence.mjs?v=0.12.0';
+import { principalSpans } from './change-shape.mjs?v=0.12.0';
 
 // Reject broad occlusions, rather than trying to identify a person from one camera.
 export function inspectBoardChange(current, baseline) {

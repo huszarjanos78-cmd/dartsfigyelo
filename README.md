@@ -23,7 +23,7 @@ Ha a bull vagy a gyűrűk nem láthatók biztosan, a program nem találgat az el
 közepéből. A telefon áthelyezése után a **Tábla újrakeresése** gombbal kezdj újra.
 A képfeldolgozás és az OpenCV is a telefon böngészőjében fut.
 
-Ez még képi változásérzékelés, nem tanított nyílfelismerő modell. Hagyományos, húsz szektoros táblához készült. Árnyék, takarás és a telefon mozgása téves jelzést okozhat. Szintetikus képi ellenőrzések és két fényképes böngészőpróba történt; az iPhone-on végzett valós próbákkal még finomítani kell. A pontérték kísérleti, javítható becslés; Android-kapcsolat még nincs.
+A 0.12.0 a nyilakat továbbra is képi változásból számlálja, a pontot viszont már helyben futó, tanított nyílhegy-modellből becsüli. Három nyugodt képen egyező hegyjelölés kell; hiányzó, takart vagy többértelmű hegy esetén a pont ismeretlen marad. Hagyományos, húsz szektoros táblához készült. Árnyék, takarás és a telefon mozgása téves jelzést okozhat. Szintetikus képi ellenőrzések és két fényképes böngészőpróba történt; az iPhone-on végzett valós próbákkal még finomítani kell. A pontérték kísérleti, javítható becslés; Android-kapcsolat még nincs.
 
 ## Folytatás másik számítógépen
 
@@ -40,6 +40,7 @@ Nyisd meg a kicsomagolt vagy klónozott projektmappát a választott kódszerkes
 npm ci --ignore-scripts
 node scripts/prepare-opencv.mjs
 npm run prepare:ocr
+npm run prepare:tips
 ```
 
 Ez letölti az OpenCV.js 4.13.0 hivatalos, ellenőrzőösszeggel rögzített fájlját a `dist/vendor` mappába. A nagy, generált könyvtár nincs a Gitben; a közzétett alkalmazás tartalmazza. A számleolvasó eszközei és modellje az npm-zárfájlban rögzített csomagokból kerülnek a `dist/vendor/ocr` mappába. Minden felismerés a böngészőben történik, a kamerakép nem kerül szerverre. Alkalmazásfordítás nem szükséges.
@@ -204,3 +205,24 @@ Sikeres számleolvasáskor az elsődleges irány veszi át a pontozást. Az ugya
 Legfeljebb három automatikus próbálkozás történik a nyugodt képen, akár nyilakkal a táblában is. A **Számok újraolvasása** gomb a számláló törlése nélkül indít új próbát. Sikeres leolvasás után az irány rögzített marad. Zoomváltás vagy tábla-újrakeresés érvényteleníti a korábbi leolvasási feladatot; új rögzítésnél ismét a leolvasás az elsődleges, a felső 20-as pedig az ideiglenes tartalék.
 
 A böngészőpróbák valódi helyi számleolvasást és számozás nélküli képen a tartalék pontozást is ellenőrzik: tábla-rögzítés, tripla 20 (60 pont), kézi javítás és automatikus új kör. Valós iPhone-os próba továbbra is szükséges. A nyíl helyéből becsült pont kísérleti, kézzel javítható érték; a szár és toll eltérhet a tényleges becsapódási ponttól.
+
+## 0.12.0 – tanított nyílhegy-felismerés (kísérleti)
+
+A képkülönbség csak keresési területet ad; a szár legbelső képpontja többé nem
+határozza meg a pontot. Az üres táblán felismert állandó téves jelöléseket kiszűrjük,
+a modell három egymást követő megfigyelésének egyeznie kell. Nyolc sikertelen
+megfigyelés után kézi javítás vagy a **Nyílhegyek újraellenőrzése** használható.
+Induláskor üres tábla szükséges. A hegyfelismerés nem javítja meg a hibás
+bull/gyűrű-beállítást vagy a téves számleolvasást. Az oldalról takart és egymáshoz
+közeli nyilak továbbra is nehéz esetek.
+
+A ScoreLens dd6 modell **CC BY-NC 4.0**, vagyis nem kereskedelmi használatra való;
+[forrás, licencek és változtatások](dist/models/README.md).
+A modell kb. 12 MB, a helyi WASM futtatókörnyezet további letöltést igényel.
+[Valós képes ellenőrzés és ismert hibák](docs/dart-tip-validation.md).
+Nincs igazolt iPhone-os pontossági eredmény.
+
+Ellenőrzés: `npm test`, majd `npx playwright install chromium` és
+`npm run test:browser`. A böngészős teszt valódi ONNX-modellt és címkézett
+fényképeket használ, de ezek részben a tanítás forrásadatbázisából származnak,
+ezért nem független pontosságmérés. A közzétételt továbbra is GitHub Actions végzi.

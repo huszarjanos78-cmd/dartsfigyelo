@@ -9,3 +9,4 @@ Thumbs.db
 .sites-checkout/
 dist/vendor/opencv.js
 dist/vendor/ocr/
+dist/vendor/ort/

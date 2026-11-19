@@ -1,4 +1,5 @@
-import { estimateHit, estimateHitPoint, scoreAt, uprightScoreRotation } from '../dist/scoring.mjs';
+import { changeBounds, confirmTipLocations } from '../dist/dart-tip-core.mjs';
+import { scoreAt, boardCoordinates, uprightScoreRotation } from '../dist/scoring.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
@@ -18,7 +19,7 @@ function app(score = 55, stable = 3) {
     if (!elements.has(id)) elements.set(id, { append() {}, style: {}, checked: false, dataset: {}, getContext: () => drawing });
     return elements.get(id);
   };
-  const context = vm.createContext({ setTimeout, clearTimeout, console, createOrientationReader: () => ({read: async () => null, stop() {}}), estimateHit, estimateHitPoint, scoreAt, uprightScoreRotation, BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE, smallHitEvidence, confirmSmallHit, inspectBoardChange, looksLikeRemoval, zoomCrop, rescaleBoard, frameDifference, buildCalibration, ellipsePoint, sameBoard, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
+  const context = vm.createContext({ setTimeout, clearTimeout, console, changeBounds, confirmTipLocations, createDartTipReader:()=>({read:async()=>({tips:[],milliseconds:1}),stop(){}}), createOrientationReader: () => ({read: async () => null, stop() {}}), scoreAt, boardCoordinates, uprightScoreRotation, BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE, smallHitEvidence, confirmSmallHit, inspectBoardChange, looksLikeRemoval, zoomCrop, rescaleBoard, frameDifference, buildCalibration, ellipsePoint, sameBoard, document: { getElementById: element, createElement: () => element('frame'), addEventListener() {} }, window: {}, navigator: {} });
   vm.runInContext(source, context);
   vm.runInContext(`stream = {}; mode = 'positioning'; stableBoards = ${stable}; candidate = { ellipse: { x: 100, y: 100, a: 80, b: 60, angle: 0 }, quality: { score: ${score} } }; renderControls();`, context);
   return { element, context };
@@ -482,4 +483,45 @@ test('An unreadable number ring keeps the upright direction and existing provisi
   assert.equal(element('score-total').textContent,'60');
   assert.match(element('score-orientation').textContent,/Tartalék pontozás: 20 felül/);
   assert.equal(element('score-retry').disabled,false);
+});
+
+function tipApp(read) {
+  const fixture=app();
+  fixture.context.createDartTipReader=()=>({read,stop(){}});
+  vm.runInContext(`
+    mode='watching';locked={x:100,y:100,a:80,b:80,angle:0};count=0;
+    emptyBaseline={};captureNumberFrame=(image,board)=>({image,board});
+    renderScores=()=>{};draw=()=>{};
+    globalThis.tipImage={width:200,height:200,data:new Uint8ClampedArray(200*200*4)};
+    scoreRotation=0;scoreMethod='ocr';
+  `,fixture.context);
+  return fixture;
+}
+const flushTips=()=>new Promise(resolve=>setImmediate(resolve));
+test('Empty-board model detections are excluded; only a new stable tip becomes a score',async()=>{
+  let calls=0;
+  const {context}=tipApp(async()=>({tips:++calls===1?[{x:108,y:52,confidence:.9}]:[{x:108,y:52,confidence:.9},{x:100,y:52,confidence:.9}]}));
+  vm.runInContext('readTipLocations(tipImage)',context);await flushTips();
+  vm.runInContext(`count=1;roundHits=[{board:locked,point:null,bounds:{minX:-.15,maxX:.15,minY:-.65,maxY:-.55}}];`,context);
+  for(let i=0;i<3;i++) {
+    vm.runInContext('nextTipRead=0;readTipLocations(tipImage)',context);await flushTips();
+    assert.equal(vm.runInContext('!!roundHits[0].point',context),i===2);
+  }
+  assert.equal(vm.runInContext('roundHits[0].estimate.score',context),60);
+});
+test('Movement while inference runs invalidates the result and confirmation history',async()=>{
+  let complete;
+  const {context}=tipApp(()=>new Promise(resolve=>{complete=resolve;}));
+  vm.runInContext(`tipBaselineReady=true;count=1;roundHits=[{board:locked,point:null,bounds:{minX:-.1,maxX:.1,minY:-.7,maxY:-.5},tipCandidate:{x:0,y:-.6,frames:2}}];readTipLocations(tipImage);invalidateTipObservations();`,context);
+  complete({tips:[{x:100,y:52,confidence:.9}]});await flushTips();
+  assert.equal(vm.runInContext('roundHits[0].point',context),null);
+  assert.equal(vm.runInContext('roundHits[0].tipCandidate',context),null);
+});
+test('Failed model keeps the count and manual score and can be retried',async()=>{
+  const {context,element}=tipApp(async()=>{throw Error('model unavailable');});
+  vm.runInContext(`tipBaselineReady=true;count=2;roundHits=[{board:locked,point:null},{board:locked,corrected:{score:40}}];readTipLocations(tipImage);`,context);
+  await flushTips();
+  assert.equal(vm.runInContext('count',context),2);assert.equal(vm.runInContext('roundHits[1].corrected.score',context),40);
+  assert.match(element('tip-status').textContent,/nem indult/);assert.equal(element('tip-retry').disabled,false);
+  element('tip-retry').onclick();assert.equal(vm.runInContext('tipFailed',context),false);
 });

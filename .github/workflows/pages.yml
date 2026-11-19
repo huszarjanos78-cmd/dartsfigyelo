@@ -26,6 +26,8 @@ jobs:
         run: npm ci --ignore-scripts --no-fund --no-audit
       - name: Prepare local number recognition
         run: npm run prepare:ocr
+      - name: Prepare trained dart-tip detector
+        run: npm run prepare:tips
       - name: Download and verify OpenCV
         run: node scripts/prepare-opencv.mjs
       - name: Check JavaScript syntax
@@ -48,6 +50,8 @@ jobs:
         run: node tests/calibration.test.mjs
       - name: Test score estimates
         run: node --test tests/scoring.test.mjs
+      - name: Test learned tip decoding and temporal confirmation
+        run: node --test tests/dart-tip.test.mjs
       - name: Test number orientation
         run: node --test tests/score-orientation.test.mjs
       - name: Install browser for scoring test

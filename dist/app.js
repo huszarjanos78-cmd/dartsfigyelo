@@ -1,10 +1,12 @@
-import { createOrientationReader } from './score-orientation.mjs?v=0.11.2';
-import { estimateHitPoint, scoreAt, uprightScoreRotation } from './scoring.mjs?v=0.11.2';
-import { smallHitEvidence, confirmSmallHit } from './hit-evidence.mjs?v=0.11.2';
-import { zoomCrop, rescaleBoard } from './camera-view.mjs?v=0.11.2';
-import { inspectBoardChange, looksLikeRemoval } from './retrieval-guard.mjs?v=0.11.2';
-import { detectBullBoard } from './bull-vision.mjs?v=0.11.2';
-import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint, BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE } from './board-vision.mjs?v=0.11.2';
+import { createDartTipReader } from './dart-tip-reader.mjs?v=0.12.0';
+import { changeBounds, confirmTipLocations } from './dart-tip-core.mjs?v=0.12.0';
+import { createOrientationReader } from './score-orientation.mjs?v=0.12.0';
+import { scoreAt, boardCoordinates, uprightScoreRotation } from './scoring.mjs?v=0.12.0';
+import { smallHitEvidence, confirmSmallHit } from './hit-evidence.mjs?v=0.12.0';
+import { zoomCrop, rescaleBoard } from './camera-view.mjs?v=0.12.0';
+import { inspectBoardChange, looksLikeRemoval } from './retrieval-guard.mjs?v=0.12.0';
+import { detectBullBoard } from './bull-vision.mjs?v=0.12.0';
+import { sameBoard, createBoardSampler, sampleBoard, createMotionReference, estimateCameraShift, prepareMotionFrame, frameDifference, ellipsePoint, BOARD_OUTER_RADIUS, BOARD_SAMPLE_RADIUS, BOARD_SAMPLE_SIZE } from './board-vision.mjs?v=0.12.0';
 
 const $ = id => document.getElementById(id);
 const video = $('video'), overlay = $('overlay'), ctx = overlay.getContext('2d');
@@ -15,6 +17,7 @@ let zoom = 1, zoomFocus = { x: .5, y: .5 }, previewRequest, emptyBaseline = null
 let stream = null, cv, cvLoading, mode = 'off', candidate = null, locked = null;
 let previousCandidate = null, stableBoards = 0, lostBoards = 0, baseline, previous, stableFrames = 0;
 let roundHits = [], scoreRotation = null, scoreMethod = 'none', orientationJob = null, orientationAttempt = 0, nextOrientation = 0;
+let tipReader = null, tipJob = null, tipRevision = 0, nextTipRead = 0, tipFailed = false, tipBackground = [], tipBaselineReady = false, tipReferenceInput = null;
 let count = 0, lastEvent = 0, timer, wake, lastScan = 0, recentHit = 0, generation = 0, boardSampler, motionReference;
 
 
@@ -41,7 +44,65 @@ function renderScores() {
   $('score-total').textContent = String(total) + (unknown ? ' + ' + unknown + ' ismeretlen' : '');
 }
 
+function pendingTipHits() {
+  return roundHits.filter(hit=>hit.board===locked&&!hit.point&&!hit.corrected&&!hit.manuallyUnknown);
+}
+function invalidateTipObservations() {
+  tipRevision++;
+  for(const hit of roundHits) hit.tipCandidate=null;
+}
+function resetTipDetector() {
+  invalidateTipObservations(); tipReader?.stop(); tipReader=null; tipJob=null; nextTipRead=0; tipFailed=false; tipBackground=[]; tipBaselineReady=false; tipReferenceInput=null;
+  $('tip-status').textContent='A pontokat a nyílhegy felismerése után adom meg.';
+}
+function readTipLocations(image,shift={x:0,y:0}) {
+  if(mode!=='watching'||!locked||tipFailed||tipJob||Date.now()<nextTipRead||!image.data||!image.width||!image.height||
+      (tipBaselineReady&&!pendingTipHits().some(hit=>(hit.tipAttempts||0)<8))||(!tipBaselineReady&&count>0&&!tipReferenceInput)) return;
+  const job={board:locked,revision:tipRevision,count:count,background:!tipBaselineReady,empty:emptyBaseline};tipJob=job;nextTipRead=Date.now()+500;
+  $('tip-status').textContent=tipReader?'A nyílhegy helyét több képen ellenőrzöm…':'A nyílhegy-felismerőt betöltöm…';
+  (async()=>{
+    if(!tipReader) tipReader=createDartTipReader();
+    const input=job.background&&tipReferenceInput?tipReferenceInput:captureNumberFrame(image,locked);
+    if(!input.sourceSize) {input.sourceSize={width:image.width,height:image.height};input.shift={...shift};}
+    if(job.background&&!tipReferenceInput)tipReferenceInput=input;
+    const board=rescaleBoard(input.board,1,1);
+    const dx=(input.shift.x||0)*input.image.width/input.sourceSize.width,dy=(input.shift.y||0)*input.image.height/input.sourceSize.height,h=board.homography;
+    h[0]+=dx*h[6];h[1]+=dx*h[7];h[2]+=dx;h[3]+=dy*h[6];h[4]+=dy*h[7];h[5]+=dy;
+    let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+    for(let i=0;i<64;i++) {const p=ellipsePoint(board,1.5,i*Math.PI/32);minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y);}
+    const x=Math.max(0,Math.floor(minX)),y=Math.max(0,Math.floor(minY));
+    const crop={x,y,width:Math.min(input.image.width,Math.ceil(maxX))-x,height:Math.min(input.image.height,Math.ceil(maxY))-y};
+    if(crop.width<=0||crop.height<=0) throw new Error('Invalid board crop');
+    const result=await tipReader.read(input.image,crop);
+    if(tipJob!==job||locked!==job.board||mode!=='watching')return;
+    const points=result.tips.map(tip=>{const p=boardCoordinates(board,tip.x,tip.y);return p?{...p,confidence:tip.confidence}:null;}).filter(Boolean);
+    if(job.background) {
+      if(emptyBaseline!==job.empty)return;
+      tipBackground=points;tipBaselineReady=true;tipReferenceInput=null;
+      $('tip-status').textContent='Az üres tábla rögzítve. A következő nyíl hegyét keresem.';
+      return;
+    }
+    if(tipRevision!==job.revision||count!==job.count)return;
+    const newPoints=points.filter(p=>tipBackground.every(old=>Math.hypot(p.x-old.x,p.y-old.y)>.03));
+    if(confirmTipLocations(roundHits,newPoints,locked)) {
+      for(const hit of roundHits) if(hit.board===locked&&hit.point&&!hit.corrected&&!hit.manuallyUnknown) {
+        hit.estimate=scoreRotation===null?null:scoreAt(hit.point.x,hit.point.y,scoreRotation);hit.method=scoreMethod;
+      }
+      renderScores();draw();
+    }
+    $('tip-status').textContent=pendingTipHits().length?
+      'Nem látok még biztos nyílhegyet. Az ismeretlen pontok kézzel megadhatók.':
+      'Az ellenőrzés kész. A pontok kézzel javíthatók.';
+  })().catch(error=>{
+    if(tipJob!==job||tipRevision!==job.revision)return;
+    tipFailed=true;console.warn('Dart tip detector:',error);
+    $('tip-status').textContent='A nyílhegy-felismerő nem indult. A pontokat kézzel add meg, vagy próbáld újra.';
+    tipReader?.stop();tipReader=null;
+  }).finally(()=>{if(tipJob===job){tipJob=null;renderControls();}});
+}
+
 function resetScoreOrientation() {
+  resetTipDetector();
   orientationJob?.cancel(); orientationJob?.reader.stop(); orientationJob = null;
   scoreRotation = null; scoreMethod = 'none'; orientationAttempt = 0; nextOrientation = 0;
   $('score-orientation').textContent = 'Először számleolvasással keresem az irányt. Ha nem sikerül: 20 felül, a közép fölött.';
@@ -136,13 +197,14 @@ function loadVision() {
 async function keepAwake() {
   try { if (!wake || wake.released) wake = await navigator.wakeLock?.request('screen'); } catch { /* Optional on iPhone. */ }
 }
-function resetComparison() { smallCandidate = null; recovery = null; emptyBaseline = null; occlusionFrames = 0; motionReference = null; baseline = null; previous = null; stableFrames = 0; lastEvent = 0; }
+function resetComparison() { invalidateTipObservations(); smallCandidate = null; recovery = null; emptyBaseline = null; occlusionFrames = 0; motionReference = null; baseline = null; previous = null; stableFrames = 0; lastEvent = 0; }
 const recommendedStartQuality = 55;
 function canStartWatching() {
   return !!stream && mode === 'positioning' && !!candidate;
 }
 function renderControls() {
   $('zoom').disabled = !stream;
+  $('tip-retry').disabled = mode!=='watching'||!!tipJob||!pendingTipHits().length;
   $('score-retry').disabled = mode !== 'watching' || !locked || !!orientationJob || scoreMethod === 'ocr';
   $('score-retry').hidden = scoreMethod === 'ocr';
   $('reset').dataset.state = mode === 'clearing' ? 'paused' : 'watching';
@@ -188,6 +250,12 @@ function draw() {
     ctx.fillStyle = '#ccf279'; ctx.font = 'bold 14px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
     ctx.fillText('20',top.x,top.y);
   }
+  roundHits.forEach((hit,index)=>{
+    if(!hit.point||hit.board!==locked)return;
+    const p=ellipsePoint(locked,Math.hypot(hit.point.x,hit.point.y),Math.atan2(hit.point.y,hit.point.x));
+    ctx.strokeStyle='#6de6ff';ctx.lineWidth=2;ctx.beginPath();ctx.arc(p.x,p.y,5,0,Math.PI*2);ctx.stroke();
+    ctx.fillStyle='#6de6ff';ctx.fillText(String(index+1),p.x+9,p.y-6);
+  });
   ctx.restore();
 }
 function wholeBoardVisible(e) {
@@ -293,6 +361,7 @@ function watch(image) {
   if (!motionReference) motionReference = createMotionReference(image, locked);
   const shift = estimateCameraShift(image, motionReference);
   if (shift.error > 10) {
+    invalidateTipObservations();
     if (!baseline) { motionReference = null; previous = null; stableFrames = 0; status('Az alaphelyzethez lépj ki a képből, és várd meg a nyugodt táblát.'); return; }
     if (++occlusionFrames >= 3) { pauseForRetrieval('Takarás vagy nagy kameraelmozdulás.'); return; }
     smallCandidate = null; previous = null; stableFrames = 0;
@@ -302,6 +371,7 @@ function watch(image) {
   const values = pixels(image, shift); if (!values.length) return;
   const change = baseline ? inspectBoardChange(values, baseline) : null;
   if (change?.obstructed) {
+    invalidateTipObservations();
     smallCandidate = null;
     previous = null; stableFrames = 0;
     if (++occlusionFrames >= 3) pauseForRetrieval('Nagy, összefüggő takarás a táblánál.');
@@ -311,7 +381,7 @@ function watch(image) {
   occlusionFrames = 0;
   if (!previous || previous.length !== values.length) { previous = values; return; }
   const motion = difference(values, previous); previous = values;
-  if (motion.ratio > 0.004 || motion.mean > 2.8) { smallCandidate = null; stableFrames = 0; status('Mozgás a táblánál. Várok a nyugodt képre…'); return; }
+  if (motion.ratio > 0.004 || motion.mean > 2.8) { invalidateTipObservations(); smallCandidate = null; stableFrames = 0; status('Mozgás a táblánál. Várok a nyugodt képre…'); return; }
   if (++stableFrames < 10) return;
   if (!baseline) {
     if (cv) {
@@ -322,7 +392,7 @@ function watch(image) {
         return;
       }
     }
-    baseline = emptyBaseline = values; readScoreOrientation(original); status('Figyelek. Jöhet a dobás!', 'good'); return;
+    baseline = emptyBaseline = values; readScoreOrientation(original); readTipLocations(original,shift); status('Figyelek. Jöhet a dobás!', 'good'); return;
   }
   readScoreOrientation(original);
   // The empty board can return without crossing the current hit threshold.
@@ -337,11 +407,11 @@ function watch(image) {
     pauseForRetrieval('Nyílkiszedéshez hasonló változás.'); return;
   }
   if (detected && Date.now() - lastEvent > 2200) {
-    const point = estimateHitPoint(values, baseline);
-    roundHits.push({ point, board:locked, method:scoreMethod, estimate: point && scoreRotation !== null ? scoreAt(point.x,point.y,scoreRotation) : null, corrected: null }); renderScores();
+    roundHits.push({point:null,bounds:changeBounds(values,baseline),board:locked,method:scoreMethod,estimate:null,corrected:null});renderScores();
     $('count').textContent = ++count; smallCandidate = null; baseline = values; lastEvent = recentHit = Date.now(); stableFrames = 0;
     status('Nyíl érzékelve · ' + count + '. találat', 'good'); speak('Nyíl érzékelve');
   } else if (Date.now() - recentHit > 2500) status('Figyelek. Jöhet a dobás!', 'good');
+  readTipLocations(original,shift);
 }
 function tick() {
   if (!stream || video.readyState < 2 || document.hidden) return;
@@ -408,6 +478,14 @@ $('score-retry').onclick = () => {
   if (mode !== 'watching' || !locked || orientationJob || scoreMethod === 'ocr') return;
   orientationAttempt = 0; nextOrientation = 0;
   $('score-orientation').textContent = 'Újra megpróbálom a számleolvasást a nyugodt képen. Addig a tartalék pontozás működik: 20 felül.';
+};
+$('tip-retry').onclick = () => {
+  if(mode!=='watching'||tipJob)return;
+  const background=tipBackground,ready=tipBaselineReady,reference=tipReferenceInput;
+  resetTipDetector();tipBackground=background;tipBaselineReady=ready;tipReferenceInput=reference;
+  for(const hit of pendingTipHits()){hit.tipAttempts=0;hit.tipCandidate=null;}
+  $('tip-status').textContent='A következő nyugodt képen újraellenőrzöm a nyílhegyeket.';
+  renderControls();
 };
 $('sound').onclick = () => speak('Nyíl érzékelve');
 document.addEventListener('visibilitychange', () => {

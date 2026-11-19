@@ -1,0 +1,33 @@
+{
+  "name": "ScoreLens dd6 / YOLOv8n dart-tip detector",
+  "source": "https://huggingface.co/Bayernator/scorelens-dd6",
+  "revision": "fc345897a23d439bae783faf4ca13d6692284a4f",
+  "checkpointSha256": "b233503a2c9610ad92376fda003cb978449ecbf4db31bbd171c62e75535a1a13",
+  "sha256": "216417df31a2a72b6abe4e1c8add4c13b52a72b2033821710f95a726d3d740db",
+  "license": "CC-BY-NC-4.0",
+  "inputSize": 800,
+  "classes": [
+    "20",
+    "3",
+    "11",
+    "6",
+    "dart",
+    "9",
+    "15"
+  ],
+  "tipClass": 4,
+  "outputShape": [
+    1,
+    11,
+    13125
+  ],
+  "export": {
+    "ultralytics": "8.3.203",
+    "torch": "2.6.0+cpu",
+    "onnx": "1.17.0",
+    "opset": 17,
+    "simplify": false,
+    "dynamic": false,
+    "half": false
+  }
+}

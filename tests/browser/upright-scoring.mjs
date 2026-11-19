@@ -67,14 +67,14 @@ try {
     context.strokeStyle='#fefefe';context.lineWidth=5;context.beginPath();context.moveTo(0,-181);context.lineTo(0,-240);context.stroke();context.restore();
   });
   await page.waitForFunction(()=>document.getElementById('count').textContent==='1',{},{timeout:20000});
-  assert.equal(await page.locator('#score-total').innerText(),'60');
+  assert.equal(await page.locator('#score-total').innerText(), '0 + 1 ismeretlen'); // A drawn stroke is not a verified dart tip.
   await page.getByLabel('1. nyíl pontértéke',{exact:true}).selectOption({label:'D20 · 40'});
   assert.equal(await page.locator('#score-total').innerText(),'40');
   await page.evaluate(()=>{const ctx=window.cameraFixture.getContext('2d');ctx.save();ctx.resetTransform();ctx.drawImage(window.fixture(),0,0);ctx.restore();});
   await page.waitForFunction(()=>document.getElementById('count').textContent==='0',{},{timeout:20000});
   assert.equal(await page.locator('#score-total').innerText(),'0');
   assert.match(await page.locator('#score-orientation').innerText(),/20 felül/);
-  console.log('Automatic T20 estimate, manual D20 correction and automatic round recovery: passed.');
+  console.log('Unknown synthetic stroke, manual D20 correction and automatic round recovery: passed.');
   assert.ok(ocrRequests.some(url=>url.endsWith('/eng.traineddata.gz')),'Number reading must actually run before the fallback is confirmed');
   assert.match(await page.locator('#score-orientation').innerText(),/nem adott biztos irányt/);
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);assert.deepEqual(failures,[]);

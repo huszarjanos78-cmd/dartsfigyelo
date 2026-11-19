@@ -1,0 +1,42 @@
+{
+  "source": "https://github.com/bnww/dart-sense",
+  "revision": "6cbcb9192c30157415a8ef8658ece17cda044a85",
+  "imagePath": "data/darts/images/small_sample/",
+  "labelPath": "data/darts/labels/small_sample/",
+  "license": "CC-BY-NC-4.0 (redistributor); underlying DeepDarts images CC-BY-4.0",
+  "attribution": "William McNally, Kanav Vats, Alexander Wong and John McPhee, DeepDarts (2021); labels redistributed by bnww/dart-sense",
+  "files": [
+    {
+      "file": "d1_02_04_2020 IMG_1093.JPG",
+      "sha256": "4bdad6d0ac5a335822ff0929eddb7410aaab950a6afb14ce6f174bdc4a743f59"
+    },
+    {
+      "file": "d1_02_04_2020 IMG_1093.txt",
+      "sha256": "378a52eef23749c04824aaa6ad4290a0dd354436907e811eeece2f7942fa1a9e"
+    },
+    {
+      "file": "d1_02_04_2020 IMG_1099.JPG",
+      "sha256": "e0d823415e80ef7e39303adc879bf17553c42e7b6980c5005277ebfb127e5b3f"
+    },
+    {
+      "file": "d1_02_04_2020 IMG_1099.txt",
+      "sha256": "96c5b1224bb1a3edf76eae0a8c496db35bbe39b90c1d9ad2eb9afd9771a58eb8"
+    },
+    {
+      "file": "d2_02_03_2021 DSC_0544.JPG",
+      "sha256": "e486127e7d75bb3cd0425f31776be47a1067e9c010504f42eba7059d094dbb25"
+    },
+    {
+      "file": "d2_02_03_2021 DSC_0544.txt",
+      "sha256": "483c60941fd4347e3d857f28608ed7da6be4ce5b2637d12162bfa7752eb974d8"
+    },
+    {
+      "file": "d2_02_03_2021 DSC_0557.JPG",
+      "sha256": "057525b76287a086b56e5a4c12a93e157ee5f62195339946d11110d4a1809a27"
+    },
+    {
+      "file": "d2_02_03_2021 DSC_0557.txt",
+      "sha256": "a30c4c0b88cdc5fc1e88b873193e274a18f7682824f699dfd94445356159c77e"
+    }
+  ]
+}

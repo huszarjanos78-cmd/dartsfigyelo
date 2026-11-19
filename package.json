@@ -1,14 +1,16 @@
 {
   "name": "dartsfigyelo",
-  "version": "0.11.2",
+  "version": "0.12.0",
   "private": true,
   "scripts": {
     "prepare:ocr": "node scripts/prepare-ocr.mjs",
     "test": "node --test tests/*.test.mjs",
-    "test:browser": "node tests/browser/automatic-orientation.mjs && node tests/browser/upright-scoring.mjs"
+    "test:browser": "node tests/browser/automatic-orientation.mjs && node tests/browser/upright-scoring.mjs && node tests/browser/trained-tips.mjs",
+    "prepare:tips": "node scripts/prepare-tip-runtime.mjs"
   },
   "devDependencies": {
     "@tesseract.js-data/eng": "1.0.0",
+    "onnxruntime-web": "1.23.2",
     "playwright": "1.65.0",
     "tesseract.js": "7.0.0"
   }
